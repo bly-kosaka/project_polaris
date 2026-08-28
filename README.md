@@ -1,170 +1,106 @@
-# Project Polaris (Codename)
+# Project Polaris
 
-> **アクセスログを、30秒で「判断できるレポート」へ。**
+アクセスログを、人とAIが確認できる構造化された観測情報へ変換するプロダクト。
 
----
-
-# Every log has a story.
-
-アクセスログには、必ず理由があります。
-
-しかし、その理由を見つけるには
-
-- ログの読み方を知っていること
-- grepやawkなどのコマンドを使えること
-- サーバやHTTPの知識があること
-- 数万〜数百万行のログから当たりを付けられること
-
-が求められます。
-
-多くのWebディレクターやWeb運用担当者は、ログを読めないわけではありません。
-
-**「読む時間がない」「自分の判断に確信が持てない」**という課題を抱えています。
-
-その結果、多くの人がChatGPTへログを貼り付けています。
-
-しかし、
-
-- ログが長すぎる
-- 分割が必要
-- 追加質問が必要
-- レポートとして残せない
-
-という課題があります。
-
-Project Polaris は、その体験を置き換えるためのプロダクトです。
+設計書は [`md/`](md/) 配下にある。実装はまず `md/26_Development_Setup_and_First_Sprint.md` の Sprint 1（リポジトリ基盤 + Analyzer Parser / Normalizer）から開始している。UI・認証・課金・AI連携はまだ実装していない。
 
 ---
 
-# Product Vision
+## Requirements
 
-アクセスログをアップロードするだけで、
+- Node.js `20.19.0`（[`.node-version`](.node-version) 参照）
+- Yarn `1.22.15`（Classic / Workspaces）
+- Docker（ローカルの PostgreSQL / Redis / MinIO 用）
 
-AIが
+## Install
 
-- 今見るべきこと
-- 危険ではないこと
-- 根拠
-- 優先順位
+```bash
+yarn install
+```
 
-を整理し、
+## Environment
 
-**"判断できるレポート"** を生成します。
+必要な環境変数は [`.env.example`](.env.example) に名前のみ記載している。ローカル開発用に `.env` を作成しコピーする。
 
----
+```bash
+cp .env.example .env
+```
 
-# This product is NOT
+`DATABASE_URL` / `REDIS_URL` / `S3_*` / `APP_BASE_URL` は Sprint 1 のローカル基盤として必須（`packages/shared` の Zod スキーマが起動時に検証し、不足時は Fail Fast する）。`OPENAI_API_KEY` / `CLERK_*` / `STRIPE_*` は該当機能が未実装のため現時点では任意。
 
-- ログビューアではありません
-- SIEMではありません
-- Datadogの代替ではありません
-- Grafanaの代替ではありません
-- AIチャットアプリでもありません
+`.env` はコミットしない。Secret Value を `.env.example` へ書かない。
 
----
+## Docker
 
-# This product IS
+ローカルの PostgreSQL / Redis / MinIO を起動する。
 
-**「ログから、本当に見るべき数行を見つけるアシスタント」**
+```bash
+docker compose -f infra/docker/docker-compose.yml up -d
+```
 
----
+| Service | Port |
+| --- | --- |
+| PostgreSQL | 5432 |
+| Redis | 6379 |
+| MinIO API | 9000 |
+| MinIO Console | 9001 |
 
-## Target User
+## Development
 
-本サービスのターゲットは、
+```bash
+yarn typecheck   # tsc -b（全Workspace）
+yarn lint        # eslint
+yarn format      # prettier --write
+```
 
-* Web制作会社のディレクター
-* Web運用担当者
-* フロントエンドエンジニア
-* 一人情シス
-* 小規模SIer
+各Workspaceは `yarn workspace @polaris/<name> <script>` で個別に実行できる。
 
-です。
+## Test
 
-共通しているのは、**アクセスログをまったく読めない人ではない**という点です。
+```bash
+yarn test
+```
 
-ログの見方やHTTPステータス、Botの存在など基本的な知識は持っており、必要であれば自力で調査することもできます。
+Analyzerのテストは [`fixtures/access-logs/`](fixtures/access-logs/) の合成データ（実案件ログは含まない）を使う。
 
-しかし、多くの現場では次のような課題を抱えています。
+## Build
 
-* アクセスログは行数が膨大で、確認に時間がかかる
-* どこから見始めればよいか毎回考える必要がある
-* grepやawkなどを使った集計や抽出が手間になる
-* 「この読み方で合っているのか」という確信が持てない
-* 調査だけで終わり、クライアントへの報告や改善提案まで手が回らない
-
-つまり、このサービスが解決したいのは**「ログが読めないこと」ではなく、「ログを読むこと自体が仕事として重く、時間も手間もかかること」**です。
-
-Project Polarisは、その調査工程を短縮し、ユーザーが**「何が起きているか」と「次に何を考えるべきか」**を短時間で把握できるよう支援します。
-
----
-
-# Core Value
-
-## 無料版
-
-- Health Score
-- Overall Status
-- 注視ポイント
-- 基本レポート
-- AI要約
-
-目的は
-
-**「ChatGPTへログを貼り付ける」という行為を置き換えること。**
-
-## 有料版
-
-- Health Scoreの詳細説明
-- 判定根拠
-- AIチャット
-- 改善提案
-- クライアント向け説明
-- 報告書生成
-- 履歴・比較
-- PDF出力
-- レポート共有
-
-目的は
-
-**「ログを改善提案へ変えること。」**
+```bash
+yarn build
+```
 
 ---
 
-# Design Philosophy
+## Repository Structure
 
-UIは学習不要であること。
+```text
+polaris/
+├─ apps/
+│  ├─ web/       Vue 3 + Vite Frontend（Sprint 1では未実装のScaffoldのみ）
+│  ├─ api/       Fastify HTTP API（同上）
+│  └─ worker/    Queue Worker（同上）
+│
+├─ packages/
+│  ├─ domain/    Framework非依存のDomain型（Lifecycle Status等）
+│  ├─ analyzer/  Analyzer Core（Sprint 1: Parser / Normalizer / Streaming Reader）
+│  ├─ ai/        AI Explanation連携（未実装）
+│  ├─ db/        Prisma Client / Repository（未実装）
+│  └─ shared/    複数Layer共通のUtility（Environment Validation等）
+│
+├─ fixtures/
+│  └─ access-logs/   Synthetic Access Log Fixture
+│
+├─ infra/
+│  └─ docker/         docker-compose.yml
+│
+├─ md/                 設計書（00〜26）
+└─ .github/workflows/  CI
+```
 
-ブランドは視覚表現で伝えること。
+### Sprint 1 のスコープ
 
-世界観は背景に存在し、操作は一般的なWebアプリの体験を維持する。
+`md/26_Development_Setup_and_First_Sprint.md` に定義された S1-01〜S1-18 に対応する。
 
-情報を最も美しく、最も分かりやすく伝えることを最優先とする。
+含む：リポジトリ / Workspace基盤、TypeScript Strict Mode、Environment Validation、Docker Compose、Domain Status型、Analyzerの Streaming Reader / Parser / Normalizer / Parse Summary、Synthetic Fixture、CI。
 
----
-
-# Brand DNA
-
-モチーフは「星座」。
-
-ログの一行一行は意味を持たない"点"。
-
-Analyzerは点同士を結び、意味のあるパターンを発見する。
-
-ブランドは星座をモチーフとするが、UI・文言・操作性は一般的なSaaSとして分かりやすさを優先する。
-
----
-
-# North Star
-
-無料版を使ったユーザーが
-
-> 「これなら次からChatGPTではなく、このサービスを使おう。」
-
-と思えること。
-
-有料版を使ったユーザーが
-
-> 「このレポートならクライアントへ提出できる。」
-
-と思えること。
+含まない（意図的にスコープ外）：Vue画面の作り込み、Clerk、Stripe、OpenAI、BullMQ本実装、Full Prisma Schema、Aggregation、Known Information、Candidate Selection、ObservationSet、Production Deploy。
