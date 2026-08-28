@@ -22,5 +22,5 @@ export type { NormalizeOutcome } from './normalizer/index.js';
 
 export { ParseSummaryBuilder, deriveAnalyzerStatus } from './summary/index.js';
 
-export { parseAccessLog } from './parse-access-log.js';
-export type { ParseAccessLogResult } from './parse-access-log.js';
+export { parseAccessLogStream, collectParsedEntries } from './parse-access-log.js';
+export type { ParseAccessLogStreamOptions, CollectedParseResult } from './parse-access-log.js';

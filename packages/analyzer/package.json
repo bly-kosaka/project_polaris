@@ -6,7 +6,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc -b tsconfig.json"
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run packages/analyzer/src/__tests__"
   },
   "dependencies": {
     "@polaris/domain": "*"

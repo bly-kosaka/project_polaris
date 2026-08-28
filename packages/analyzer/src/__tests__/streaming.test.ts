@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readLines } from '../streaming/read-lines.js';
-import { parseAccessLog } from '../parse-access-log.js';
+import { parseAccessLogStream } from '../parse-access-log.js';
 
 let tmpDir: string | undefined;
 
@@ -48,14 +48,45 @@ describe('readLines', () => {
     }
     expect(count).toBe(lineCount);
   });
+});
 
-  it('feeds directly into parseAccessLog end to end for a large file', async () => {
+describe('parseAccessLogStream — memory sanity', () => {
+  it('feeds directly into an incremental consumer for a large file', async () => {
     const lineCount = 10000;
     const filePath = await writeSyntheticLog(lineCount);
 
-    const { summary } = await parseAccessLog(readLines(filePath));
+    let seen = 0;
+    const summary = await parseAccessLogStream(readLines(filePath), {
+      onEntry: () => {
+        seen += 1;
+      },
+    });
+
     expect(summary.totalLines).toBe(lineCount);
     expect(summary.parsedLines).toBe(lineCount);
     expect(summary.failedLines).toBe(0);
+    expect(seen).toBe(lineCount);
+  });
+
+  it('never accumulates parsed entries itself — only a per-line callback sees them', async () => {
+    const lineCount = 50000;
+    const filePath = await writeSyntheticLog(lineCount);
+
+    // A consumer that only keeps a running tally proves the production API
+    // doesn't need — and doesn't build — an array of all 50,000 entries
+    // (26_Development_Setup_and_First_Sprint.md #45-#46 / M-01 in 27_Sprint_1_Review.md).
+    let tally = 0;
+    let lastPath: string | undefined;
+    const summary = await parseAccessLogStream(readLines(filePath), {
+      onEntry: (entry) => {
+        tally += 1;
+        lastPath = entry.path;
+      },
+    });
+
+    expect(tally).toBe(lineCount);
+    expect(lastPath).toBe(`/page-${lineCount - 1}`);
+    // The returned summary is the only retained value — no entries array exists to leak.
+    expect(summary).not.toHaveProperty('entries');
   });
 });
