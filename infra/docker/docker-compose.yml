@@ -1,3 +1,7 @@
+# Host ports for postgres/redis are shifted off their defaults (55432/56379)
+# so this stack doesn't collide with another project's containers already
+# bound to 5432/6379 on the same machine. Container-internal ports are
+# untouched — only DATABASE_URL / REDIS_URL on the host side need the shift.
 services:
   postgres:
     image: postgres:16-alpine
@@ -6,14 +10,14 @@ services:
       POSTGRES_PASSWORD: polaris
       POSTGRES_DB: polaris
     ports:
-      - '5432:5432'
+      - '55432:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
     ports:
-      - '6379:6379'
+      - '56379:6379'
     volumes:
       - redis-data:/data
 

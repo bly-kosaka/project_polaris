@@ -38,12 +38,14 @@ cp .env.example .env
 docker compose -f infra/docker/docker-compose.yml up -d
 ```
 
-| Service | Port |
+| Service | Host Port |
 | --- | --- |
-| PostgreSQL | 5432 |
-| Redis | 6379 |
+| PostgreSQL | 55432 |
+| Redis | 56379 |
 | MinIO API | 9000 |
 | MinIO Console | 9001 |
+
+PostgreSQL / Redis は他プロジェクトの標準ポート(5432 / 6379)との衝突を避けるため非標準ポートを使う。`DATABASE_URL` / `REDIS_URL` はこのポートで設定する。
 
 ## Development
 
