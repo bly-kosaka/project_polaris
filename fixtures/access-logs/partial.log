@@ -1,0 +1,5 @@
+192.0.2.10 - - [10/Oct/2023:14:00:01 +0000] "GET /index.html HTTP/1.1" 200 1024 "https://example.com/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+198.51.100.5 - - [10/Oct/2023:14:00:15 +0000] "GET /pricing.html HTTP/1.1" 200 998 "https://example.com/index.html" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+203.0.113.9 - - [not-a-valid-timestamp] "GET /docs.html HTTP/1.1" 200 700 "-" "Mozilla/5.0 (X11; Linux x86_64)"
+192.0.2.60 - - [10/Oct/2023:14:01:20 +0000] "GET /report.pdf HTTP/1.1" ERR 5120 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+198.51.100.5 - - [10/Oct/2023:14:02:00 +0000] "GET  /broken request HTTP/1.1" 200 512 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
