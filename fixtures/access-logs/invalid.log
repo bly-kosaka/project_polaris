@@ -1,0 +1,3 @@
+2023-10-10 13:55:36 ERROR Database connection refused
+{"level":"error","msg":"unexpected token","service":"web"}
+CRITICAL disk usage at 92% on host web-01
