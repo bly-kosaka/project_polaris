@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+// Deliberately not named AnalysisStatus — the domain type of that name
+// (@polaris/domain) must never be confused with, or accidentally imported
+// instead of, this Prisma-generated enum.
+enum AnalysisLifecycleStatus {
+  CREATED
+  UPLOADED
+  ANALYZING
+  ANALYZER_RESULT_READY
+  EXPLAINING
+  COMPLETED
+  FAILED
+}
+
+enum AnalyzerExecutionStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+enum AIExecutionStatus {
+  NOT_REQUESTED
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum KnownInformationMatchType {
+  EXACT
+  PREFIX
+}
+
+// Single member today, but a real constraint — an unrestricted String
+// column would let the mapper silently reinterpret any stored value as
+// 'path' regardless of what's actually in the database.
+enum KnownInformationTarget {
+  PATH
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  primaryUrl  String?
+  hostname    String?
+  status      ProjectStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  analyses            Analysis[]
+  knownInformationSet ProjectKnownInformation[]
+}
+
+model Analysis {
+  id             String                   @id @default(cuid())
+  projectId      String
+  project        Project                  @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  status         AnalysisLifecycleStatus  @default(CREATED)
+  analyzerStatus AnalyzerExecutionStatus?
+  aiStatus       AIExecutionStatus        @default(NOT_REQUESTED)
+
+  originalFileName               String?
+  fileSizeBytes                  Int?
+  detectedLogFormat              String?
+  firstSeen                      DateTime?
+  lastSeen                       DateTime?
+  totalLineCount                 Int?
+  totalRequestCount              Int?
+  observationSetVersion          String?
+  analyzerConfigurationVersion   String?
+  knownInformationDatasetVersion String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  observationSet ObservationSetRecord?
+
+  @@index([projectId])
+}
+
+// analysisId @unique is the DB-level enforcement of "1 Analysis = 1
+// ObservationSet" — a second insert for the same Analysis throws P2002.
+model ObservationSetRecord {
+  id            String   @id @default(cuid())
+  analysisId    String   @unique
+  analysis      Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  schemaVersion String
+  data          Json
+  createdAt     DateTime @default(now())
+}
+
+model ProjectKnownInformation {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  target      KnownInformationTarget    @default(PATH)
+  matchType   KnownInformationMatchType
+  pattern     String
+  title       String
+  description String?
+  enabled     Boolean                   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId, enabled])
+}

@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import 'dotenv/config';
 import { defineConfig } from 'vitest/config';
 
 // Pinned so `include` resolves against the repo root regardless of the
@@ -13,5 +14,9 @@ export default defineConfig({
   test: {
     include: ['{apps,packages}/*/src/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/dist/**'],
+    // packages/db's PostgreSQL integration tests share one beforeEach
+    // resetDatabase() — safe only when test files never run concurrently
+    // against the same database (32_Sprint_3_Plan_Review.md F-04).
+    fileParallelism: false,
   },
 });

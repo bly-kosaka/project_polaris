@@ -13,15 +13,19 @@
   ],
   "scripts": {
     "dev": "echo \"Select a workspace, e.g. yarn workspace @polaris/api dev\"",
+    "postinstall": "yarn workspace @polaris/db run generate",
     "build": "tsc -b tsconfig.json",
     "typecheck": "tsc -b tsconfig.json --pretty",
     "lint": "eslint .",
     "test": "vitest run",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "db:migrate:dev": "yarn workspace @polaris/db run migrate:dev",
+    "db:migrate:deploy": "yarn workspace @polaris/db run migrate:deploy"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
     "@types/node": "^20.14.15",
+    "dotenv": "^16.4.5",
     "eslint": "^9.9.1",
     "prettier": "^3.3.3",
     "typescript": "^5.5.4",
