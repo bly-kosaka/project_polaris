@@ -8,6 +8,25 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: polaris
+          POSTGRES_PASSWORD: polaris
+          POSTGRES_DB: polaris
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # An isolated GitHub Actions runner has no port conflict to dodge, so
+      # this uses Postgres's default port unlike the local dev shift to
+      # 55432 (infra/docker/docker-compose.yml's own comment explains why).
+      DATABASE_URL: postgresql://polaris:polaris@localhost:5432/polaris
     steps:
       - uses: actions/checkout@v4
 
@@ -17,13 +36,21 @@ jobs:
           cache: 'yarn'
 
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        # --ignore-engines: @prisma/streams-local (a transitive dependency
+        # of the unused `prisma studio` feature) declares Node >=22, but
+        # Prisma's own top-level engines.node accepts 20.19 — a known
+        # inconsistency deep in an unused sub-dependency, not a real
+        # incompatibility (verified against the live npm registry).
+        run: yarn install --frozen-lockfile --ignore-engines
 
       - name: Type check
         run: yarn typecheck
 
       - name: Lint
         run: yarn lint
+
+      - name: Run database migrations
+        run: yarn db:migrate:deploy
 
       - name: Test
         run: yarn test

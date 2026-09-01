@@ -47,6 +47,17 @@ docker compose -f infra/docker/docker-compose.yml up -d
 
 PostgreSQL / Redis は他プロジェクトの標準ポート(5432 / 6379)との衝突を避けるため非標準ポートを使う。`DATABASE_URL` / `REDIS_URL` はこのポートで設定する。
 
+## Database Migration
+
+`packages/db` は Prisma 7（`prisma-client` Generator + `@prisma/adapter-pg` Driver Adapter）で PostgreSQL に接続する。接続先は `schema.prisma` ではなく `packages/db/prisma.config.ts` が `DATABASE_URL` から読む。
+
+```bash
+yarn db:migrate:dev      # ローカル: Migration作成 + 適用
+yarn db:migrate:deploy   # CI/本番相当: 既存Migrationの適用のみ
+```
+
+Prisma Clientの型は `yarn install` の `postinstall` で自動生成される（`packages/db/src/generated/prisma/`、Gitには含めない）。Schemaを変更した場合は手動で `yarn workspace @polaris/db run generate` を再実行する。
+
 ## Development
 
 ```bash
@@ -86,7 +97,7 @@ polaris/
 │  ├─ domain/    Framework非依存のDomain型（Lifecycle Status等）
 │  ├─ analyzer/  Analyzer Core（Sprint 1: Parser / Normalizer / Streaming Reader）
 │  ├─ ai/        AI Explanation連携（未実装）
-│  ├─ db/        Prisma Client / Repository（未実装）
+│  ├─ db/        Prisma Client / Repository（Project / Analysis / ObservationSetRecord / ProjectKnownInformation）
 │  └─ shared/    複数Layer共通のUtility（Environment Validation等）
 │
 ├─ fixtures/
