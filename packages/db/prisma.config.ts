@@ -1,5 +1,11 @@
-import 'dotenv/config';
+import path from 'node:path';
+import { config } from 'dotenv';
 import { defineConfig } from 'prisma/config';
+
+// `yarn workspace @polaris/db run ...` runs with this package's directory as
+// cwd, not the repo root — dotenv's default `.env` lookup would miss the
+// root-level .env entirely, so the path is resolved explicitly instead.
+config({ path: path.resolve(import.meta.dirname, '../../.env') });
 
 export default defineConfig({
   schema: 'prisma/schema.prisma',
