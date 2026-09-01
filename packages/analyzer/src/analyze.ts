@@ -1,6 +1,7 @@
 import { AggregationEngine } from './aggregation/aggregation-engine.js';
 import { DEFAULT_AGGREGATION_CONFIG } from './aggregation/types.js';
 import type { AggregationConfig } from './aggregation/types.js';
+import { validateResolvedConfig } from './config-validation.js';
 import { AggregationError, mapAnalyzerFailure } from './errors.js';
 import type { AnalyzerFailureResult } from './errors.js';
 import { checkExclusion } from './exclusion/apply-exclusion.js';
@@ -69,6 +70,14 @@ export async function analyzeAccessLog(
   try {
     const exclusionConfig = resolveExclusionConfig(config.exclusion);
     const aggregationConfig = resolveAggregationConfig(config.aggregation);
+    const selectionConfig = resolveSelectionConfig(config.selection);
+    const redactionConfig = resolveRedactionConfig(config.redaction);
+
+    // Validate before any streaming parse work begins — mirrors how
+    // PARSER_NO_VALID_LINES is returned early without doing aggregation work
+    // (31_Development_Setup_and_Third_Sprint.md §9: "不正ConfigでRaw Log処理を開始しない").
+    validateResolvedConfig({ aggregation: aggregationConfig, selection: selectionConfig });
+
     const exclusionSummaryBuilder = new ExclusionSummaryBuilder();
     const aggregationEngine = new AggregationEngine(aggregationConfig);
 
@@ -100,8 +109,8 @@ export async function analyzeAccessLog(
       aggregationSet: annotated,
       parseSummary,
       exclusion: exclusionSummaryBuilder.build(),
-      selectionConfig: resolveSelectionConfig(config.selection),
-      redactionConfig: resolveRedactionConfig(config.redaction),
+      selectionConfig,
+      redactionConfig,
       knownInformationDatasetVersion: BUILT_IN_KNOWN_INFORMATION_DATASET_VERSION,
     });
 

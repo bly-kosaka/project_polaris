@@ -1,5 +1,12 @@
 import type { ParseSummary } from './types/parse-summary.js';
 
+export class AnalyzerConfigValidationError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'AnalyzerConfigValidationError';
+  }
+}
+
 export class AggregationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
@@ -37,6 +44,7 @@ export interface AnalyzerFailureResult {
 }
 
 function classify(error: unknown): AnalyzerErrorCode {
+  if (error instanceof AnalyzerConfigValidationError) return 'ANALYZER_INVALID_CONFIGURATION';
   if (error instanceof RedactionSafetyError) return 'ANALYZER_REDACTION_SAFETY_FAILURE';
   if (error instanceof ObservationSetValidationError) return 'ANALYZER_OBSERVATION_SET_INVALID';
   if (error instanceof AggregationError) return 'ANALYZER_AGGREGATION_FAILED';
