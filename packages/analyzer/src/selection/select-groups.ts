@@ -79,11 +79,17 @@ export function selectGroups<T>(
     return { value, selectionReasons: sortReasons(reasons) };
   });
 
+  // omittedGroups is always totalGroups - selectedGroups — including groups
+  // that never hit any axis or the representative fill and so never entered
+  // `deduped` at all. Counting only deduped.length - kept.length undercounts
+  // exactly those never-candidate groups, which breaks the
+  // selectedGroups + omittedGroups === totalGroups invariant on any
+  // high-cardinality input (30_Sprint_2_Review.md C-01).
   const totalGroups = items.length;
   if (deduped.length <= totalLimit) {
     return {
       selected: deduped,
-      truncation: { totalGroups, selectedGroups: deduped.length, omittedGroups: 0 },
+      truncation: { totalGroups, selectedGroups: deduped.length, omittedGroups: totalGroups - deduped.length },
     };
   }
 
@@ -101,6 +107,6 @@ export function selectGroups<T>(
   const kept = prioritized.slice(0, totalLimit);
   return {
     selected: kept,
-    truncation: { totalGroups, selectedGroups: kept.length, omittedGroups: deduped.length - kept.length },
+    truncation: { totalGroups, selectedGroups: kept.length, omittedGroups: totalGroups - kept.length },
   };
 }
