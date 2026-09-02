@@ -10,7 +10,11 @@
   },
   "dependencies": {
     "@polaris/analyzer": "*",
+    "@polaris/db": "*",
     "@polaris/domain": "*",
-    "@polaris/shared": "*"
+    "@polaris/queue": "*",
+    "@polaris/shared": "*",
+    "@polaris/storage": "*",
+    "bullmq": "6.3.4"
   }
 }

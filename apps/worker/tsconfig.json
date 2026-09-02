@@ -8,6 +8,9 @@
   "references": [
     { "path": "../../packages/analyzer" },
     { "path": "../../packages/domain" },
-    { "path": "../../packages/shared" }
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/queue" },
+    { "path": "../../packages/storage" }
   ]
 }

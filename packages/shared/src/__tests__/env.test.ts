@@ -33,4 +33,16 @@ describe('loadEnv', () => {
     expect(env.NODE_ENV).toBe('development');
     expect(env.S3_FORCE_PATH_STYLE).toBe(true);
   });
+
+  it('defaults MAX_UPLOAD_BYTES and RAW_LOG_RETENTION_HOURS when absent', () => {
+    const env = loadEnv(validEnv);
+    expect(env.MAX_UPLOAD_BYTES).toBe(52428800);
+    expect(env.RAW_LOG_RETENTION_HOURS).toBe(24);
+  });
+
+  it('coerces MAX_UPLOAD_BYTES/RAW_LOG_RETENTION_HOURS from string env values', () => {
+    const env = loadEnv({ ...validEnv, MAX_UPLOAD_BYTES: '1000', RAW_LOG_RETENTION_HOURS: '48' });
+    expect(env.MAX_UPLOAD_BYTES).toBe(1000);
+    expect(env.RAW_LOG_RETENTION_HOURS).toBe(48);
+  });
 });

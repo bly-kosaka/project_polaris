@@ -1,7 +1,11 @@
-# Host ports for postgres/redis are shifted off their defaults (55432/56379)
+# Host ports for postgres/redis are shifted off their defaults (55432/16379)
 # so this stack doesn't collide with another project's containers already
 # bound to 5432/6379 on the same machine. Container-internal ports are
 # untouched — only DATABASE_URL / REDIS_URL on the host side need the shift.
+# Redis uses 16379, not the more obvious 56379 — that port falls inside a
+# Windows/Hyper-V dynamic port-exclusion range on this machine (confirmed via
+# `netsh interface ipv4 show excludedportrange protocol=tcp`) and fails to
+# bind (34_Development_Setup_and_Fourth_Sprint.md §9).
 services:
   postgres:
     image: postgres:16-alpine
@@ -17,12 +21,17 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - '56379:6379'
+      - '16379:6379'
     volumes:
       - redis-data:/data
 
+  # Pinned, not :latest — the MinIO Docker image lost curl/wget from $PATH in
+  # late 2023 (breaks any container-internal healthcheck) and the upstream
+  # GitHub repo was archived/read-only on 2026-04-25, so this tag is very
+  # likely at or near the final release ever published. Matches the tag used
+  # in CI (35_Sprint_4_Plan_Review.md round 3, F-12).
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: polaris

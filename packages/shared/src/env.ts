@@ -23,6 +23,12 @@ const envSchema = z.object({
     .default('true')
     .transform((value) => value === 'true'),
 
+  // Pre-benchmark placeholders (34_Development_Setup_and_Fourth_Sprint.md
+  // §21/§43) — both a real limit and a real retention window are required,
+  // never left unbounded, but the exact numbers are expected to be tuned later.
+  MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(52428800),
+  RAW_LOG_RETENTION_HOURS: z.coerce.number().int().positive().default(24),
+
   OPENAI_API_KEY: z.string().optional(),
   AI_EXPLANATION_MODEL: z.string().optional(),
   AI_CHAT_MODEL: z.string().optional(),

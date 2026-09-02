@@ -9,7 +9,12 @@
     "build": "tsc -b tsconfig.json"
   },
   "dependencies": {
+    "@fastify/multipart": "10.1.1",
+    "@polaris/db": "*",
     "@polaris/domain": "*",
-    "@polaris/shared": "*"
+    "@polaris/queue": "*",
+    "@polaris/shared": "*",
+    "@polaris/storage": "*",
+    "fastify": "5.12.1"
   }
 }

@@ -76,4 +76,48 @@ describe('PrismaAnalysisRepository', () => {
       code: 'NOT_FOUND',
     });
   });
+
+  describe('compareAndSetStatus (F-07)', () => {
+    it('returns true and applies the update when the current status matches `from`', async () => {
+      const project = await createProject();
+      const repository = new PrismaAnalysisRepository(prisma);
+      const created = await repository.create({ projectId: project.id });
+      await repository.updateStatus(created.id, 'uploaded');
+
+      const claimed = await repository.compareAndSetStatus(created.id, 'uploaded', 'analyzing');
+      expect(claimed).toBe(true);
+
+      const reloaded = await repository.findById(created.id);
+      expect(reloaded?.status).toBe('analyzing');
+    });
+
+    it('returns false without applying anything when the current status does not match `from` (T-02/T-15)', async () => {
+      const project = await createProject();
+      const repository = new PrismaAnalysisRepository(prisma);
+      const created = await repository.create({ projectId: project.id });
+      await repository.updateStatus(created.id, 'uploaded');
+      await repository.updateStatus(created.id, 'analyzing');
+
+      // A second CAS attempt from 'uploaded' finds the row already moved on.
+      const claimed = await repository.compareAndSetStatus(created.id, 'uploaded', 'analyzing');
+      expect(claimed).toBe(false);
+
+      const reloaded = await repository.findById(created.id);
+      expect(reloaded?.status).toBe('analyzing');
+    });
+
+    it('only one of two concurrent CAS calls wins on the same row (T-02 concurrency)', async () => {
+      const project = await createProject();
+      const repository = new PrismaAnalysisRepository(prisma);
+      const created = await repository.create({ projectId: project.id });
+      await repository.updateStatus(created.id, 'uploaded');
+
+      const [first, second] = await Promise.all([
+        repository.compareAndSetStatus(created.id, 'uploaded', 'analyzing'),
+        repository.compareAndSetStatus(created.id, 'uploaded', 'analyzing'),
+      ]);
+
+      expect([first, second].filter(Boolean)).toHaveLength(1);
+    });
+  });
 });

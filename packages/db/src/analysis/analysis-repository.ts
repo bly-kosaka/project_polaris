@@ -6,4 +6,17 @@ export interface AnalysisRepository {
   findById(id: string): Promise<Analysis | null>;
   listByProjectId(projectId: string): Promise<Analysis[]>;
   updateStatus(id: string, status: AnalysisStatus, fields?: UpdateAnalysisPersistenceFields): Promise<Analysis>;
+  /**
+   * Atomic `UPDATE ... WHERE id = ? AND status = ?` — the second-Worker
+   * guard for `uploaded -> analyzing` (35_Sprint_4_Plan_Review.md F-07).
+   * Returns whether this call was the one that made the change; a `false`
+   * result means either another caller already made it, or `from` didn't
+   * match the current row — the caller must re-read to tell which.
+   */
+  compareAndSetStatus(
+    id: string,
+    from: AnalysisStatus,
+    to: AnalysisStatus,
+    fields?: UpdateAnalysisPersistenceFields,
+  ): Promise<boolean>;
 }

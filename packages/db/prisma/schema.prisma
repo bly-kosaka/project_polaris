@@ -53,6 +53,39 @@ enum KnownInformationTarget {
   PATH
 }
 
+// 'DELETED' = normal post-persist lifecycle delete (success or fatal
+// Analyzer outcome); 'EXPIRED' = Cleanup/Retention safety-net delete. Same
+// underlying storage delete, different terminal status recorded
+// (35_Sprint_4_Plan_Review.md F-13).
+enum UploadedAccessLogStatus {
+  UPLOADED
+  PROCESSING
+  DELETED
+  EXPIRED
+}
+
+enum RawLogDeletionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+// AI_EXPLANATION is unused until the AI sprint — exists now so
+// AnalysisExecution's @@unique([analysisId, type]) constraint doesn't need a
+// schema change to accommodate it later.
+enum AnalysisExecutionType {
+  ANALYZER
+  AI_EXPLANATION
+}
+
+enum AnalysisExecutionStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
 model Project {
   id          String        @id @default(cuid())
   name        String
@@ -89,7 +122,9 @@ model Analysis {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  observationSet ObservationSetRecord?
+  observationSet     ObservationSetRecord?
+  uploadedAccessLog  UploadedAccessLog?
+  executions         AnalysisExecution[]
 
   @@index([projectId])
 }
@@ -121,4 +156,45 @@ model ProjectKnownInformation {
   updatedAt DateTime @updatedAt
 
   @@index([projectId, enabled])
+}
+
+// analysisId @unique is the DB-level enforcement of "1 Analysis = max 1 Raw
+// Access Log" (34_Development_Setup_and_Fourth_Sprint.md §14).
+model UploadedAccessLog {
+  id               String   @id @default(cuid())
+  analysisId       String   @unique
+  analysis         Analysis @relation(fields: [analysisId], references: [id], onDelete: Restrict)
+
+  originalFileName String
+  sizeBytes        Int
+  mimeType         String?
+  storageKey       String
+
+  status         UploadedAccessLogStatus @default(UPLOADED)
+  deletionStatus RawLogDeletionStatus    @default(PENDING)
+
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  deletedAt DateTime?
+}
+
+// @@unique([analysisId, type]) is the DB-level enforcement of "1 Analysis x
+// 1 Execution Type = 1 mutable Execution Record" (35_Sprint_4_Plan_Review.md
+// F-05) — findByAnalysisIdAndType() relies on this being at most one row.
+model AnalysisExecution {
+  id         String   @id @default(cuid())
+  analysisId String
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  type   AnalysisExecutionType
+  status AnalysisExecutionStatus
+
+  attempt     Int       @default(0)
+  errorCode   String?
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([analysisId, type])
 }

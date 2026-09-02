@@ -41,11 +41,13 @@ docker compose -f infra/docker/docker-compose.yml up -d
 | Service | Host Port |
 | --- | --- |
 | PostgreSQL | 55432 |
-| Redis | 56379 |
+| Redis | 16379 |
 | MinIO API | 9000 |
 | MinIO Console | 9001 |
 
-PostgreSQL / Redis は他プロジェクトの標準ポート(5432 / 6379)との衝突を避けるため非標準ポートを使う。`DATABASE_URL` / `REDIS_URL` はこのポートで設定する。
+PostgreSQL / Redis は他プロジェクトの標準ポート(5432 / 6379)との衝突を避けるため非標準ポートを使う。`DATABASE_URL` / `REDIS_URL` はこのポートで設定する。Redis は `56379` ではなく `16379` を使う — `56379` は Windows/Hyper-V の動的ポート除外範囲に含まれており bind に失敗するため(`netsh interface ipv4 show excludedportrange protocol=tcp` で確認可能)。
+
+MinIO は `:latest` ではなくタグ固定(`RELEASE.2025-09-07T16-13-09Z`)を使う。MinIO の Docker Image は 2023 年に `curl`/`wget` が `$PATH` から削除されておりコンテナ内 Healthcheck が機能しないため、Healthcheck は CI 側の Step から `curl` で待ち受ける形にしている。
 
 ## Database Migration
 

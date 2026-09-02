@@ -7,6 +7,28 @@ import type { AnalysisRepository } from './analysis-repository.js';
 import { toDomainAnalysis } from './mapper.js';
 import type { CreateAnalysisPersistenceInput, UpdateAnalysisPersistenceFields } from './types.js';
 
+function buildUpdateData(status: AnalysisStatus, fields?: UpdateAnalysisPersistenceFields) {
+  const metadata = fields?.metadata;
+  return {
+    status: toPrismaAnalysisStatus(status),
+    ...(fields?.analyzerStatus !== undefined ? { analyzerStatus: toPrismaAnalyzerStatus(fields.analyzerStatus) } : {}),
+    ...(metadata?.originalFileName !== undefined ? { originalFileName: metadata.originalFileName } : {}),
+    ...(metadata?.fileSizeBytes !== undefined ? { fileSizeBytes: metadata.fileSizeBytes } : {}),
+    ...(metadata?.detectedLogFormat !== undefined ? { detectedLogFormat: metadata.detectedLogFormat } : {}),
+    ...(metadata?.firstSeen !== undefined ? { firstSeen: new Date(metadata.firstSeen) } : {}),
+    ...(metadata?.lastSeen !== undefined ? { lastSeen: new Date(metadata.lastSeen) } : {}),
+    ...(metadata?.totalLineCount !== undefined ? { totalLineCount: metadata.totalLineCount } : {}),
+    ...(metadata?.totalRequestCount !== undefined ? { totalRequestCount: metadata.totalRequestCount } : {}),
+    ...(metadata?.observationSetVersion !== undefined ? { observationSetVersion: metadata.observationSetVersion } : {}),
+    ...(metadata?.analyzerConfigurationVersion !== undefined
+      ? { analyzerConfigurationVersion: metadata.analyzerConfigurationVersion }
+      : {}),
+    ...(metadata?.knownInformationDatasetVersion !== undefined
+      ? { knownInformationDatasetVersion: metadata.knownInformationDatasetVersion }
+      : {}),
+  };
+}
+
 export class PrismaAnalysisRepository implements AnalysisRepository {
   constructor(private readonly client: PrismaClientLike) {}
 
@@ -50,34 +72,30 @@ export class PrismaAnalysisRepository implements AnalysisRepository {
     }
     assertValidAnalysisStatusTransition(current.status, status);
 
-    const metadata = fields?.metadata;
     try {
       const record = await this.client.analysis.update({
         where: { id },
-        data: {
-          status: toPrismaAnalysisStatus(status),
-          ...(fields?.analyzerStatus !== undefined
-            ? { analyzerStatus: toPrismaAnalyzerStatus(fields.analyzerStatus) }
-            : {}),
-          ...(metadata?.originalFileName !== undefined ? { originalFileName: metadata.originalFileName } : {}),
-          ...(metadata?.fileSizeBytes !== undefined ? { fileSizeBytes: metadata.fileSizeBytes } : {}),
-          ...(metadata?.detectedLogFormat !== undefined ? { detectedLogFormat: metadata.detectedLogFormat } : {}),
-          ...(metadata?.firstSeen !== undefined ? { firstSeen: new Date(metadata.firstSeen) } : {}),
-          ...(metadata?.lastSeen !== undefined ? { lastSeen: new Date(metadata.lastSeen) } : {}),
-          ...(metadata?.totalLineCount !== undefined ? { totalLineCount: metadata.totalLineCount } : {}),
-          ...(metadata?.totalRequestCount !== undefined ? { totalRequestCount: metadata.totalRequestCount } : {}),
-          ...(metadata?.observationSetVersion !== undefined
-            ? { observationSetVersion: metadata.observationSetVersion }
-            : {}),
-          ...(metadata?.analyzerConfigurationVersion !== undefined
-            ? { analyzerConfigurationVersion: metadata.analyzerConfigurationVersion }
-            : {}),
-          ...(metadata?.knownInformationDatasetVersion !== undefined
-            ? { knownInformationDatasetVersion: metadata.knownInformationDatasetVersion }
-            : {}),
-        },
+        data: buildUpdateData(status, fields),
       });
       return toDomainAnalysis(record);
+    } catch (error) {
+      throw mapPrismaError(error);
+    }
+  }
+
+  async compareAndSetStatus(
+    id: string,
+    from: AnalysisStatus,
+    to: AnalysisStatus,
+    fields?: UpdateAnalysisPersistenceFields,
+  ): Promise<boolean> {
+    assertValidAnalysisStatusTransition(from, to);
+    try {
+      const result = await this.client.analysis.updateMany({
+        where: { id, status: toPrismaAnalysisStatus(from) },
+        data: buildUpdateData(to, fields),
+      });
+      return result.count === 1;
     } catch (error) {
       throw mapPrismaError(error);
     }
