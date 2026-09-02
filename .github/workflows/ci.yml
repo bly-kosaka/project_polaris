@@ -22,11 +22,46 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      # No --health-cmd here: the MinIO image dropped curl/wget from $PATH
+      # in 2023, so a container-internal healthcheck can't run at all
+      # (github.com/minio/minio issues #18371/#18373/#18389 — confirmed
+      # during 35_Sprint_4_Plan_Review.md's F-12). Readiness is instead
+      # polled from the "Wait for MinIO" step below, using the runner's own
+      # curl. Pinned to the same release as infra/docker/docker-compose.yml
+      # — the MinIO repo is archived/read-only upstream as of 2026-04-25.
+      minio:
+        image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+        command: server /data
+        env:
+          MINIO_ROOT_USER: polaris
+          MINIO_ROOT_PASSWORD: polaris123
+        ports:
+          - 9000:9000
+          - 9001:9001
     env:
       # An isolated GitHub Actions runner has no port conflict to dodge, so
-      # this uses Postgres's default port unlike the local dev shift to
-      # 55432 (infra/docker/docker-compose.yml's own comment explains why).
+      # this uses each service's default port unlike the local dev shifts
+      # (55432/16379 — infra/docker/docker-compose.yml's own comments
+      # explain why those are needed only on this machine).
       DATABASE_URL: postgresql://polaris:polaris@localhost:5432/polaris
+      REDIS_URL: redis://localhost:6379
+      S3_ENDPOINT: http://localhost:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: polaris-raw-logs
+      S3_ACCESS_KEY_ID: polaris
+      S3_SECRET_ACCESS_KEY: polaris123
+      S3_FORCE_PATH_STYLE: 'true'
+      MAX_UPLOAD_BYTES: '52428800'
+      RAW_LOG_RETENTION_HOURS: '24'
     steps:
       - uses: actions/checkout@v4
 
@@ -51,6 +86,11 @@ jobs:
 
       - name: Run database migrations
         run: yarn db:migrate:deploy
+
+      - name: Wait for MinIO
+        run: |
+          curl --retry 20 --retry-delay 1 --retry-connrefused --fail \
+            http://localhost:9000/minio/health/live
 
       - name: Test
         run: yarn test

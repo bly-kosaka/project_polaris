@@ -26,7 +26,7 @@ yarn install
 cp .env.example .env
 ```
 
-`DATABASE_URL` / `REDIS_URL` / `S3_*` / `APP_BASE_URL` は Sprint 1 のローカル基盤として必須（`packages/shared` の Zod スキーマが起動時に検証し、不足時は Fail Fast する）。`OPENAI_API_KEY` / `CLERK_*` / `STRIPE_*` は該当機能が未実装のため現時点では任意。
+`DATABASE_URL` / `REDIS_URL` / `S3_*` / `APP_BASE_URL` は必須（`packages/shared` の Zod スキーマが起動時に検証し、不足時は Fail Fast する）。`MAX_UPLOAD_BYTES`（既定 50MB）/ `RAW_LOG_RETENTION_HOURS`（既定 24時間）はベンチマーク前の仮値で、両方とも Config化されており無制限にはならない。`OPENAI_API_KEY` / `CLERK_*` / `STRIPE_*` は該当機能が未実装のため現時点では任意。
 
 `.env` はコミットしない。Secret Value を `.env.example` へ書かない。
 
@@ -70,6 +70,27 @@ yarn format      # prettier --write
 
 各Workspaceは `yarn workspace @polaris/<name> <script>` で個別に実行できる。
 
+### API / Worker をローカルで動かす
+
+Docker Compose（PostgreSQL / Redis / MinIO）が起動している状態で、Migrationを適用してからそれぞれBuildして起動する。
+
+```bash
+yarn db:migrate:dev
+yarn workspace @polaris/api build && yarn workspace @polaris/api start      # http://localhost:3001
+yarn workspace @polaris/worker build && yarn workspace @polaris/worker start
+```
+
+API最小Endpoint（`md/34_Development_Setup_and_Fourth_Sprint.md` §50）：
+
+```text
+POST /projects/:projectId/analyses      Analysis作成
+POST /analyses/:analysisId/upload       Raw Access Log Upload（multipart/form-data, フィールド名 "file"）
+GET  /analyses/:analysisId              Status Polling
+GET  /analyses/:analysisId/observations ObservationSet取得（未生成時は404）
+```
+
+Analyzer本体はAPI Process内では実行しない。UploadはTemporary Storageへ保存後、Redis/BullMQ経由でWorkerへEnqueueされ、Worker側でAnalyzerを実行してPostgreSQLへPersistし、成功後にRaw Access Logを削除する。Project作成用の公開APIは本Sprintでは未実装で、Test/Fixtureからは`packages/db`のRepositoryを直接使う。
+
 ## Test
 
 ```bash
@@ -91,15 +112,18 @@ yarn build
 ```text
 polaris/
 ├─ apps/
-│  ├─ web/       Vue 3 + Vite Frontend（Sprint 1では未実装のScaffoldのみ）
-│  ├─ api/       Fastify HTTP API（同上）
-│  └─ worker/    Queue Worker（同上）
+│  ├─ web/       Vue 3 + Vite Frontend（未実装のScaffoldのみ）
+│  ├─ api/       Fastify HTTP API（Upload / Status / Observations Endpoint）
+│  └─ worker/    BullMQ Worker（Analyzer Job / Raw Log Delete Retry / Cleanup）
 │
 ├─ packages/
-│  ├─ domain/    Framework非依存のDomain型（Lifecycle Status等）
-│  ├─ analyzer/  Analyzer Core（Sprint 1: Parser / Normalizer / Streaming Reader）
+│  ├─ domain/    Framework非依存のDomain型（Project / Analysis / UploadedAccessLog / AnalysisExecution 等）
+│  ├─ analyzer/  Analyzer Core（Parser / Normalizer / Aggregation / Known Information / ObservationSet）
 │  ├─ ai/        AI Explanation連携（未実装）
-│  ├─ db/        Prisma Client / Repository（Project / Analysis / ObservationSetRecord / ProjectKnownInformation）
+│  ├─ db/        Prisma Client / Repository（Project / Analysis / ObservationSetRecord /
+│  │              ProjectKnownInformation / UploadedAccessLog / AnalysisExecution）
+│  ├─ queue/     BullMQ Queue境界（Queue名 / Job Payload型 / Connection Factory / enqueue）
+│  ├─ storage/   Temporary Object Storage境界（S3/MinIO Adapter, Storage Key生成）
 │  └─ shared/    複数Layer共通のUtility（Environment Validation等）
 │
 ├─ fixtures/
@@ -108,7 +132,7 @@ polaris/
 ├─ infra/
 │  └─ docker/         docker-compose.yml
 │
-├─ md/                 設計書（00〜26）
+├─ md/                 設計書（00〜35）
 └─ .github/workflows/  CI
 ```
 
@@ -119,3 +143,13 @@ polaris/
 含む：リポジトリ / Workspace基盤、TypeScript Strict Mode、Environment Validation、Docker Compose、Domain Status型、Analyzerの Streaming Reader / Parser / Normalizer / Parse Summary、Synthetic Fixture、CI。
 
 含まない（意図的にスコープ外）：Vue画面の作り込み、Clerk、Stripe、OpenAI、BullMQ本実装、Full Prisma Schema、Aggregation、Known Information、Candidate Selection、ObservationSet、Production Deploy。
+
+### Sprint 4 のスコープ
+
+`md/34_Development_Setup_and_Fourth_Sprint.md` に定義された S4-01〜S4-50 に対応する。
+
+含む：Redis/BullMQ Queue（`packages/queue`）、Temporary Object Storage（`packages/storage`, MinIO/S3 Compatible）、Upload Lifecycle、Analyzer Worker（CAS/Idempotency Guard含む）、Raw Log Delete + Retry + Cleanup、Retry Classification、最小Fastify API、PostgreSQL/Redis/MinIO実Integration Test。
+
+含まない（意図的にスコープ外）：Vue Aggregation UI、AI Explanation、Authentication、Billing、Report/CSV Export、WebSocket/SSE、Compressed Log Upload、Direct Signed URL Upload、Production Deploy。
+
+最重要不変条件：ObservationSet Persist成功前にRaw Access Logを削除しない（詳細は `md/34_Development_Setup_and_Fourth_Sprint.md` §5、実装判断の経緯は `md/35_Sprint_4_Plan_Review.md` 参照）。
