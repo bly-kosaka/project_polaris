@@ -1,9 +1,27 @@
+import { ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import { PrismaAnalysisRepository, PrismaProjectRepository, PrismaUploadedAccessLogRepository } from '@polaris/db';
 import { buildAnalyzerJobId } from '@polaris/queue';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../server.js';
-import { buildApiDeps, buildMultipartUpload, readFixture, resetDatabase } from './api-test-helpers.js';
+import { BUCKET, buildApiDeps, buildMultipartUpload, readFixture, resetDatabase } from './api-test-helpers.js';
+
+const s3Client = new S3Client({
+  endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
+  region: process.env.S3_REGION ?? 'us-east-1',
+  forcePathStyle: true,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? 'polaris',
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? 'polaris123',
+  },
+});
+
+async function listObjectsUnderAnalysis(analysisId: string): Promise<number> {
+  const result = await s3Client.send(
+    new ListObjectsV2Command({ Bucket: BUCKET, Prefix: `raw-logs/${analysisId}/` }),
+  );
+  return result.KeyCount ?? 0;
+}
 
 describe('analyses routes', () => {
   let deps: Awaited<ReturnType<typeof buildApiDeps>>;
@@ -136,6 +154,12 @@ describe('analyses routes', () => {
 
       const job = await deps.analyzerQueue.getJob(buildAnalyzerJobId(analysisId));
       expect(job).toBeUndefined();
+
+      // m-01 (36_Sprint_4_Review.md): confirm the Object was actually
+      // removed from MinIO, not just that the DB/Queue never learned its
+      // key — the compensating delete could silently no-op and this
+      // assertion would previously still have passed.
+      expect(await listObjectsUnderAnalysis(analysisId)).toBe(0);
     } finally {
       await smallLimitApp.close();
       await smallLimitDeps.close();

@@ -40,3 +40,27 @@ export async function enqueueCleanupJob(
     { attempts: 3, jobId: buildCleanupJobId(timeBucket) },
   );
 }
+
+const CLEANUP_SCHEDULER_ID = 'cleanup-expired-raw-logs-scheduler';
+
+/**
+ * Registers a repeatable Cleanup Job so the 24h Retention safety net
+ * actually fires without anything else having to remember to enqueue it —
+ * `enqueueCleanupJob()` existing was not enough on its own
+ * (36_Sprint_4_Review.md M-02). `upsertJobScheduler` is idempotent by
+ * `jobSchedulerId`, so calling this on every Worker startup never creates
+ * duplicate schedulers. `scheduledAt` in the generated jobs' payload is
+ * informational only — `handleCleanupJob` queries `expiresAt < now()`
+ * against the real clock at run time, never trusting the Queue as a time
+ * source (Queue is not the Source of Truth, 34_Development_Setup_and_Fourth_Sprint.md §6).
+ */
+export async function registerCleanupScheduler(
+  queue: Queue<CleanupExpiredRawLogsJobData>,
+  everyMs = 60 * 60 * 1000,
+): Promise<void> {
+  await queue.upsertJobScheduler(
+    CLEANUP_SCHEDULER_ID,
+    { every: everyMs },
+    { name: CLEANUP_JOB, data: { scheduledAt: new Date(0).toISOString() } },
+  );
+}

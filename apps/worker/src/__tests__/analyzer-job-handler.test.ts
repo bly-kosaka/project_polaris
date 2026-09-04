@@ -137,25 +137,33 @@ describe('handleAnalyzerJob', () => {
     expect(observationSet).not.toBeNull();
   });
 
-  it('T-20: claiming the job (CAS success) marks the Raw Log as processing', async () => {
+  it('T-20: handleAnalyzerJob itself marks the Raw Log as processing right after claiming (m-02 strengthening)', async () => {
+    // A fault placed at "markProcessing has already run, Analyzer hasn't
+    // started yet" via a getObjectStream that always throws — the handler
+    // stops there (retryable, attempts not exhausted), so the resulting DB
+    // state is a genuine side effect of handleAnalyzerJob's own code path,
+    // not a manual repository call standing in for it
+    // (36_Sprint_4_Review.md m-02: the previous version of this test never
+    // actually exercised handleAnalyzerJob for the transition it claimed to
+    // verify).
     const { analysisId } = await setUpUploadedAnalysis(deps, 'valid.log');
-    await handleAnalyzerJob(fakeJob(analysisId), deps);
+    const storageThatNeverReturnsAStream: TemporaryObjectStorage = {
+      putObject: (params) => deps.storage.putObject(params),
+      exists: (key) => deps.storage.exists(key),
+      deleteObject: (key) => deps.storage.deleteObject(key),
+      getObjectStream: async () => {
+        throw new Error('fault injected: stop right after markProcessing, before the Analyzer runs');
+      },
+    };
+    const depsThatStallBeforeAnalyzing: WorkerDeps = { ...deps, storage: storageThatNeverReturnsAStream };
 
-    // By the time the handler finishes on the success path the Raw Log has
-    // already moved past 'processing' to 'deleted' — assert the
-    // intermediate transition directly via the repository instead.
-    const uploadedAccessLogRepository = new PrismaUploadedAccessLogRepository(deps.prisma);
-    const { analysisId: secondAnalysisId } = await setUpUploadedAnalysis(deps, 'valid.log');
-    await new PrismaAnalysisRepository(deps.prisma).updateStatus(secondAnalysisId, 'uploaded');
-    const claimed = await new PrismaAnalysisRepository(deps.prisma).compareAndSetStatus(
-      secondAnalysisId,
-      'uploaded',
-      'analyzing',
-    );
-    expect(claimed).toBe(true);
-    await uploadedAccessLogRepository.markProcessing(secondAnalysisId);
-    const midFlight = await uploadedAccessLogRepository.findByAnalysisId(secondAnalysisId);
-    expect(midFlight?.status).toBe('processing');
+    await expect(handleAnalyzerJob(fakeJob(analysisId), depsThatStallBeforeAnalyzing)).rejects.toThrow();
+
+    const analysis = await new PrismaAnalysisRepository(deps.prisma).findById(analysisId);
+    expect(analysis?.status).toBe('analyzing'); // CAS did claim it
+
+    const uploadedAccessLog = await new PrismaUploadedAccessLogRepository(deps.prisma).findByAnalysisId(analysisId);
+    expect(uploadedAccessLog?.status).toBe('processing'); // set by handleAnalyzerJob itself, not a manual call
   });
 
   it('T-06/T-17: a Raw Log delete failure leaves the ObservationSet valid and enqueues a retry', async () => {

@@ -1,6 +1,13 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '@polaris/db';
-import { ANALYZER_QUEUE, createMaintenanceQueue, createWorkerConnection, MAINTENANCE_QUEUE, RAW_LOG_DELETE_JOB } from '@polaris/queue';
+import {
+  ANALYZER_QUEUE,
+  createMaintenanceQueue,
+  createWorkerConnection,
+  MAINTENANCE_QUEUE,
+  RAW_LOG_DELETE_JOB,
+  registerCleanupScheduler,
+} from '@polaris/queue';
 import type { AnalyzerJobData, CleanupExpiredRawLogsJobData, RawLogDeleteJobData } from '@polaris/queue';
 import { loadEnv } from '@polaris/shared';
 import { ensureBucket, S3TemporaryObjectStorage } from '@polaris/storage';
@@ -47,6 +54,12 @@ async function main(): Promise<void> {
     },
     { connection, concurrency: 1 },
   );
+
+  // 24h Retention safety net (34_Development_Setup_and_Fourth_Sprint.md §38-39)
+  // only actually fires if something enqueues it — registering a repeatable
+  // scheduler here is that "something" (36_Sprint_4_Review.md M-02).
+  // Idempotent by scheduler id, so re-registering on every restart is safe.
+  await registerCleanupScheduler(deps.maintenanceQueue);
 
   let shuttingDown = false;
   async function shutdown(): Promise<void> {

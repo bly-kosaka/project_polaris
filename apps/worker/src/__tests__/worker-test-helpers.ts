@@ -32,7 +32,17 @@ export function readFixture(name: string): string {
   return readFileSync(path.join(repoRoot, 'fixtures', 'access-logs', name), 'utf-8');
 }
 
-export async function buildWorkerDeps(): Promise<WorkerDeps & { close: () => Promise<void> }> {
+/**
+ * `connection` is returned alongside (not inside) `WorkerDeps` — production
+ * code never carries a raw Redis connection in WorkerDeps, only the
+ * pre-built `maintenanceQueue`. Tests that need to build their own
+ * short-lived analyzer Queue/Worker (bullmq-test-helpers.ts, for real
+ * retry/backoff behavior — M-04) reuse this connection rather than each
+ * opening a separate one.
+ */
+export async function buildWorkerDeps(): Promise<
+  WorkerDeps & { connection: ReturnType<typeof createWorkerConnection>; close: () => Promise<void> }
+> {
   const s3Client = new S3Client({
     endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
     region: process.env.S3_REGION ?? 'us-east-1',
@@ -53,6 +63,7 @@ export async function buildWorkerDeps(): Promise<WorkerDeps & { close: () => Pro
     prisma,
     storage,
     maintenanceQueue,
+    connection,
     close: async () => {
       await maintenanceQueue.close();
       connection.disconnect();
