@@ -20,12 +20,22 @@ import { linesFromStream } from './stream-lines.js';
 type FinalizeResult = { persisted: true } | { persisted: false; error: unknown };
 
 /**
- * Marks the Analysis/AnalysisExecution as failed. Returns whether the
- * persist itself succeeded — the caller must not treat a failure to
- * *record* the failure the same as the Analyzer's own result being
- * non-retryable (36_Sprint_4_Review.md C-01). Deliberately does not touch
- * the Raw Log — the two call sites below (non-retryable result vs. retry
- * exhaustion) have opposite correct answers for whether to delete it.
+ * Marks the Analysis as failed. Returns whether *that* persist succeeded —
+ * the caller must not treat a failure to record the failure the same as
+ * the Analyzer's own result being non-retryable (36_Sprint_4_Review.md
+ * C-01). Deliberately does not touch the Raw Log — the two call sites
+ * below (non-retryable result vs. retry exhaustion) have opposite correct
+ * answers for whether to delete it.
+ *
+ * Once `persistAnalyzerFailure` succeeds, that is the Lifecycle commit
+ * point — Analysis.status = 'failed' is now durable and correct. The
+ * AnalysisExecution metadata update after it is observability-only and
+ * must never be able to undo that commit or block the caller's Raw Log
+ * reconciliation / UnrecoverableError: a prior version let an
+ * updateProgress() failure here propagate uncaught, silently discarding
+ * the already-successful failure persist's outcome (36_Sprint_4_Review.md
+ * M-05) — so it's now try/caught and swallowed, same as
+ * reconcileRawLogDeletion's own never-throw contract.
  */
 async function persistFailureAndUpdateExecution(
   analysisId: string,
@@ -37,11 +47,16 @@ async function persistFailureAndUpdateExecution(
   } catch (error) {
     return { persisted: false, error };
   }
-  await new PrismaAnalysisExecutionRepository(deps.prisma).updateProgress(analysisId, 'analyzer', {
-    status: 'failed',
-    errorCode,
-    completedAt: new Date().toISOString(),
-  });
+  try {
+    await new PrismaAnalysisExecutionRepository(deps.prisma).updateProgress(analysisId, 'analyzer', {
+      status: 'failed',
+      errorCode,
+      completedAt: new Date().toISOString(),
+    });
+  } catch {
+    // Left as stale observability metadata — Analysis.status is the real
+    // Lifecycle source of truth and is already durably 'failed'.
+  }
   return { persisted: true };
 }
 

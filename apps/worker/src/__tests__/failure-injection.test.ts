@@ -10,7 +10,11 @@ import type { TemporaryObjectStorage } from '@polaris/storage';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import type { WorkerDeps } from '../deps.js';
 import { runAnalyzerJobToSettlement } from './bullmq-test-helpers.js';
-import { withFailingAnalysisUpdate, withFailingTransaction } from './prisma-fault-injection.js';
+import {
+  withFailingAnalysisUpdate,
+  withFailingExecutionUpdateOnFinalize,
+  withFailingTransaction,
+} from './prisma-fault-injection.js';
 import { buildWorkerDeps, resetDatabase, setUpUploadedAnalysis } from './worker-test-helpers.js';
 
 /**
@@ -57,6 +61,34 @@ describe('failure injection (M-04)', () => {
 
     const observationSet = await new PrismaObservationSetRepository(deps.prisma).findByAnalysisId(analysisId);
     expect(observationSet).toBeNull();
+  }, 15000);
+
+  it('M-05 regression: an AnalysisExecution metadata-update failure after a successful failure-persist does not undo it', async () => {
+    const { analysisId, storageKey } = await setUpUploadedAnalysis(deps, 'invalid.log');
+
+    const depsWithFlakyExecutionUpdate: WorkerDeps = {
+      ...deps,
+      prisma: withFailingExecutionUpdateOnFinalize(deps.prisma, 'simulated AnalysisExecution finalize-update failure'),
+    };
+
+    const state = await runAnalyzerJobToSettlement(depsWithFlakyExecutionUpdate, deps.connection, analysisId, {
+      attempts: 2,
+    });
+    // persistAnalyzerFailure() itself succeeds on the very first attempt —
+    // this must still reach UnrecoverableError, not silently retry/
+    // complete because the *metadata* update afterward failed.
+    expect(state).toBe('failed');
+
+    const analysis = await new PrismaAnalysisRepository(deps.prisma).findById(analysisId);
+    expect(analysis?.status).toBe('failed'); // the commit point held
+    expect(analysis?.analyzerStatus).toBe('failed');
+
+    const observationSet = await new PrismaObservationSetRepository(deps.prisma).findByAnalysisId(analysisId);
+    expect(observationSet).toBeNull();
+
+    // Raw Log reconciliation still ran despite the Execution-metadata
+    // failure (36_Sprint_4_Review.md M-05's ordering requirement).
+    expect(await deps.storage.exists(storageKey)).toBe(false);
   }, 15000);
 
   it('storage.getObjectStream transient failure is retried and succeeds on the next attempt', async () => {

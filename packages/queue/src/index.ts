@@ -10,3 +10,4 @@ export type { AnalyzerJobData, RawLogDeleteJobData, CleanupExpiredRawLogsJobData
 export { createProducerConnection, createWorkerConnection } from './connection.js';
 export { createAnalyzerQueue, createMaintenanceQueue } from './queues.js';
 export { enqueueAnalyzerJob, enqueueRawLogDeleteJob, enqueueCleanupJob, registerCleanupScheduler } from './enqueue.js';
+export { recoverAnalyzerEnqueue } from './recover-analyzer-enqueue.js';
