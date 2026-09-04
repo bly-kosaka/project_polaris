@@ -62,6 +62,7 @@ jobs:
       S3_FORCE_PATH_STYLE: 'true'
       MAX_UPLOAD_BYTES: '52428800'
       RAW_LOG_RETENTION_HOURS: '24'
+      CORS_ORIGIN: http://localhost:5173
     steps:
       - uses: actions/checkout@v4
 
@@ -78,8 +79,16 @@ jobs:
         # incompatibility (verified against the live npm registry).
         run: yarn install --frozen-lockfile --ignore-engines
 
-      - name: Type check
-        run: yarn typecheck
+      # Backend (apps/api, apps/worker, packages/*) and frontend (apps/web)
+      # are independent toolchains (40_Sprint_5_Plan_Review.md, decision 1) —
+      # run as separate named steps via the :backend/:frontend scripts so
+      # neither runs twice under the plain umbrella commands
+      # (40_Sprint_5_Plan_Review.md F-03).
+      - name: Backend Typecheck
+        run: yarn typecheck:backend
+
+      - name: Frontend Typecheck
+        run: yarn typecheck:frontend
 
       - name: Lint
         run: yarn lint
@@ -92,8 +101,20 @@ jobs:
           curl --retry 20 --retry-delay 1 --retry-connrefused --fail \
             http://localhost:9000/minio/health/live
 
-      - name: Test
-        run: yarn test
+      - name: Backend Test
+        run: yarn test:backend
 
-      - name: Build
-        run: yarn build
+      - name: Frontend Test
+        run: yarn test:frontend
+
+      - name: Backend Build
+        # Runs before the Product Integration Test: apps/product-e2e imports
+        # apps/api and apps/worker through their built dist/ output (via the
+        # `exports` subpaths added for this — F-05), not their TS source.
+        run: yarn build:backend
+
+      - name: Product Integration Test
+        run: yarn workspace @polaris/product-e2e run test
+
+      - name: Frontend Build
+        run: yarn build:frontend

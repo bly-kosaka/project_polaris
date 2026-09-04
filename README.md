@@ -62,8 +62,12 @@ Prisma Clientの型は `yarn install` の `postinstall` で自動生成される
 
 ## Development
 
+`apps/web`（Vue 3 + Vite）はBackend（`tsc -b`のProject Reference Graph）から独立したToolchainを持つ（`vue-tsc` / Vite自身のType Check）。Root Scriptはこの境界に沿って`:backend` / `:frontend`に分割しており、CIはこの分割済みScriptを個別のStepとして呼ぶ（重複実行防止, `md/40_Sprint_5_Plan_Review.md` F-03）。素の`typecheck` / `test` / `build`はローカルでの一括実行用。
+
 ```bash
-yarn typecheck   # tsc -b（全Workspace）
+yarn typecheck   # = typecheck:backend && typecheck:frontend
+yarn test        # = test:backend && test:frontend
+yarn build       # = build:backend && build:frontend
 yarn lint        # eslint
 yarn format      # prettier --write
 ```
@@ -89,7 +93,25 @@ GET  /analyses/:analysisId              Status Polling
 GET  /analyses/:analysisId/observations ObservationSet取得（未生成時は404）
 ```
 
-Analyzer本体はAPI Process内では実行しない。UploadはTemporary Storageへ保存後、Redis/BullMQ経由でWorkerへEnqueueされ、Worker側でAnalyzerを実行してPostgreSQLへPersistし、成功後にRaw Access Logを削除する。Project作成用の公開APIは本Sprintでは未実装で、Test/Fixtureからは`packages/db`のRepositoryを直接使う。
+Analyzer本体はAPI Process内では実行しない。UploadはTemporary Storageへ保存後、Redis/BullMQ経由でWorkerへEnqueueされ、Worker側でAnalyzerを実行してPostgreSQLへPersistし、成功後にRaw Access Logを削除する。
+
+Sprint 5でProject / Analysis一覧・作成のEndpointを追加し、APIの Error Response は全Route共通で `{ error: { code, message } }` 形式になった。
+
+```text
+POST /projects                          Project作成
+GET  /projects                          Project一覧（Analysis数 / 最終Analysis日時付き）
+GET  /projects/:projectId               Project詳細
+GET  /projects/:projectId/analyses      Project配下のAnalysis一覧
+```
+
+### Web (Vue) をローカルで動かす
+
+API（`http://localhost:3001`）が起動している状態で、別Terminalで:
+
+```bash
+cp apps/web/.env.example apps/web/.env   # VITE_API_BASE_URL
+yarn workspace @polaris/web run dev      # http://localhost:5173
+```
 
 ## Test
 
@@ -98,6 +120,13 @@ yarn test
 ```
 
 Analyzerのテストは [`fixtures/access-logs/`](fixtures/access-logs/) の合成データ（実案件ログは含まない）を使う。
+
+`apps/product-e2e` は apps/api・apps/worker・apps/webの実コードを1Processに組み合わせたProduct Integration Test（Project作成→Upload→実Worker処理→Polling→Result画面→Path Aggregation表示→行Click→Detail Drawer表示）。Docker ComposeのPostgreSQL/Redis/MinIOに対して実行するため、`apps/api` / `apps/worker` を先にBuildしておく必要がある（`exports`のSubpath経由でdist/を読むため）。
+
+```bash
+yarn build:backend
+yarn workspace @polaris/product-e2e run test
+```
 
 ## Build
 
@@ -112,9 +141,10 @@ yarn build
 ```text
 polaris/
 ├─ apps/
-│  ├─ web/       Vue 3 + Vite Frontend（未実装のScaffoldのみ）
-│  ├─ api/       Fastify HTTP API（Upload / Status / Observations Endpoint）
-│  └─ worker/    BullMQ Worker（Analyzer Job / Raw Log Delete Retry / Cleanup）
+│  ├─ web/           Vue 3 + Vite Frontend（Project / Analysis / Result画面）
+│  ├─ api/           Fastify HTTP API（Project / Analysis CRUD, Upload / Status / Observations Endpoint）
+│  ├─ worker/        BullMQ Worker（Analyzer Job / Raw Log Delete Retry / Cleanup）
+│  └─ product-e2e/   apps/web・api・workerを実Infra上で結合するProduct Integration Test
 │
 ├─ packages/
 │  ├─ domain/    Framework非依存のDomain型（Project / Analysis / UploadedAccessLog / AnalysisExecution 等）
@@ -153,3 +183,11 @@ polaris/
 含まない（意図的にスコープ外）：Vue Aggregation UI、AI Explanation、Authentication、Billing、Report/CSV Export、WebSocket/SSE、Compressed Log Upload、Direct Signed URL Upload、Production Deploy。
 
 最重要不変条件：ObservationSet Persist成功前にRaw Access Logを削除しない（詳細は `md/34_Development_Setup_and_Fourth_Sprint.md` §5、実装判断の経緯は `md/35_Sprint_4_Plan_Review.md` 参照）。
+
+### Sprint 5 のスコープ
+
+`md/39_Development_Setup_and_Fifth_Sprint.md` に対応する。
+
+含む：`apps/web`（Project作成・一覧、Analysis作成・Upload・Processing Polling、Result画面のPath/Source IP/Status/Method/User-Agent/Time Aggregation Tab、Detail Drawer）、`apps/api`のProject/Analysis一覧・詳細Endpoint追加とError Response形式の統一、`apps/product-e2e`（実Infra上のProduct Integration Test）。
+
+含まない（意図的にスコープ外, `md/10_Output_Presentation.md`）：AI Explanation（Sprint 6）、Authentication、Billing、Health/Risk/Severity/Priority Score（恒久的にスコープ外）、Raw Log Viewer、WebSocket/SSE。

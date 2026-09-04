@@ -1,0 +1,27 @@
+{
+  "name": "@polaris/product-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run -c vitest.config.ts"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "3.1123.0",
+    "@polaris/api": "*",
+    "@polaris/db": "*",
+    "@polaris/queue": "*",
+    "@polaris/shared": "*",
+    "@polaris/storage": "*",
+    "@polaris/web": "*",
+    "@polaris/worker": "*",
+    "@vitejs/plugin-vue": "6.0.8",
+    "@vue/test-utils": "2.5.0",
+    "bullmq": "6.3.4",
+    "happy-dom": "20.14.0",
+    "vite": "8.2.2",
+    "vitest": "5.0.0",
+    "vue": "3.5.42",
+    "vue-router": "5.3.1"
+  }
+}

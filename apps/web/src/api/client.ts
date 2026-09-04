@@ -1,0 +1,68 @@
+/**
+ * A small ApiError carrying the backend's `{ error: { code, message } }`
+ * contract (39_Development_Setup_and_Fifth_Sprint.md §13) — pages branch on
+ * `.code`, never parse `.message` for logic. `status === 0` means the
+ * request never reached the server at all (network failure).
+ */
+export class ApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+export interface ApiFetchOptions {
+  method?: 'GET' | 'POST' | 'DELETE';
+  body?: BodyInit;
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+}
+
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+
+function isApiErrorBody(value: unknown): value is { error: { code: string; message: string } } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'error' in value &&
+    typeof (value as { error: unknown }).error === 'object' &&
+    (value as { error: { code?: unknown } }).error !== null &&
+    typeof (value as { error: { code?: unknown } }).error.code === 'string' &&
+    typeof (value as { error: { message?: unknown } }).error.message === 'string'
+  );
+}
+
+export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}${path}`, {
+      method: options.method ?? 'GET',
+      ...(options.body !== undefined ? { body: options.body } : {}),
+      ...(options.headers !== undefined ? { headers: options.headers } : {}),
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
+    });
+  } catch {
+    throw new ApiError(0, 'NETWORK_ERROR', 'Failed to reach the server');
+  }
+
+  if (!response.ok) {
+    let parsed: unknown;
+    try {
+      parsed = await response.json();
+    } catch {
+      throw new ApiError(response.status, 'UNEXPECTED_RESPONSE', `Request failed with status ${response.status}`);
+    }
+    if (isApiErrorBody(parsed)) {
+      throw new ApiError(response.status, parsed.error.code, parsed.error.message);
+    }
+    throw new ApiError(response.status, 'UNEXPECTED_RESPONSE', `Request failed with status ${response.status}`);
+  }
+
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
