@@ -9,4 +9,10 @@ export interface ApiDeps {
   analyzerQueue: Queue<AnalyzerJobData>;
   maxUploadBytes: number;
   rawLogRetentionHours: number;
+  /**
+   * Read from env by index.ts's loadEnv() and passed in here — buildServer()
+   * stays a pure, deterministic factory, never reading process.env itself
+   * (40_Sprint_5_Plan_Review.md F-04).
+   */
+  corsOrigin: string;
 }

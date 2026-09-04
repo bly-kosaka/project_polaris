@@ -1,10 +1,16 @@
 import type { Analysis, AnalysisStatus } from '@polaris/domain';
-import type { CreateAnalysisPersistenceInput, UpdateAnalysisPersistenceFields } from './types.js';
+import type { AnalysisListItem, CreateAnalysisPersistenceInput, UpdateAnalysisPersistenceFields } from './types.js';
 
 export interface AnalysisRepository {
   create(input: CreateAnalysisPersistenceInput): Promise<Analysis>;
   findById(id: string): Promise<Analysis | null>;
   listByProjectId(projectId: string): Promise<Analysis[]>;
+  /**
+   * Backs `GET /projects/{id}/analyses` — one query with joined
+   * UploadedAccessLog/ObservationSetRecord, not N+1
+   * (40_Sprint_5_Plan_Review.md §8/F-01).
+   */
+  listSummariesByProjectId(projectId: string): Promise<AnalysisListItem[]>;
   updateStatus(id: string, status: AnalysisStatus, fields?: UpdateAnalysisPersistenceFields): Promise<Analysis>;
   /**
    * Atomic `UPDATE ... WHERE id = ? AND status = ?` — the second-Worker

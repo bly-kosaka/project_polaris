@@ -5,6 +5,20 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./analyzer-job-handler": {
+      "types": "./dist/analyzer-job-handler.d.ts",
+      "default": "./dist/analyzer-job-handler.js"
+    },
+    "./deps": {
+      "types": "./dist/deps.d.ts",
+      "default": "./dist/deps.js"
+    }
+  },
   "scripts": {
     "build": "tsc -b tsconfig.json",
     "start": "node dist/index.js"

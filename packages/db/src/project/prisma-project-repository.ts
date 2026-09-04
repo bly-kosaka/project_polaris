@@ -3,7 +3,7 @@ import type { PrismaClientLike } from '../client.js';
 import { mapPrismaError } from '../errors.js';
 import { toDomainProject } from './mapper.js';
 import type { ProjectRepository } from './project-repository.js';
-import type { CreateProjectPersistenceInput } from './types.js';
+import type { CreateProjectPersistenceInput, ProjectListItem } from './types.js';
 
 export class PrismaProjectRepository implements ProjectRepository {
   constructor(private readonly client: PrismaClientLike) {}
@@ -28,6 +28,25 @@ export class PrismaProjectRepository implements ProjectRepository {
     try {
       const record = await this.client.project.findUnique({ where: { id } });
       return record !== null ? toDomainProject(record) : null;
+    } catch (error) {
+      throw mapPrismaError(error);
+    }
+  }
+
+  async listAllWithSummary(): Promise<ProjectListItem[]> {
+    try {
+      const records = await this.client.project.findMany({
+        orderBy: { updatedAt: 'desc' },
+        include: {
+          _count: { select: { analyses: true } },
+          analyses: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
+        },
+      });
+      return records.map((record) => ({
+        ...toDomainProject(record),
+        analysisCount: record._count.analyses,
+        ...(record.analyses[0] !== undefined ? { latestAnalysisAt: record.analyses[0].createdAt.toISOString() } : {}),
+      }));
     } catch (error) {
       throw mapPrismaError(error);
     }

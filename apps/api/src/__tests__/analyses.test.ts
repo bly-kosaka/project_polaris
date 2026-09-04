@@ -54,6 +54,12 @@ describe('analyses routes', () => {
     expect(typeof body.analysisId).toBe('string');
   });
 
+  it('POST /projects/:projectId/analyses returns 404 PROJECT_NOT_FOUND for an unknown project', async () => {
+    const response = await app.inject({ method: 'POST', url: '/projects/nonexistent-id/analyses' });
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: { code: 'PROJECT_NOT_FOUND', message: expect.any(String) } });
+  });
+
   it('upload happy path: enqueues the Analyzer job with the deterministic jobId', async () => {
     const { analysisId } = await createProjectAndAnalysis();
     const { body, contentType } = buildMultipartUpload({
@@ -97,6 +103,7 @@ describe('analyses routes', () => {
       headers: { 'content-type': contentType },
     });
     expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: { code: 'ANALYSIS_NOT_FOUND', message: expect.any(String) } });
   });
 
   it('rejects a second upload for an Analysis that already has one (T-09 precondition guard)', async () => {
@@ -122,6 +129,12 @@ describe('analyses routes', () => {
       headers: { 'content-type': contentType },
     });
     expect(second.statusCode).toBe(409);
+    // Status already moved to 'uploaded' after the first successful upload,
+    // so the created-state check (checked first) is what actually rejects
+    // this — ANALYSIS_NOT_IN_CREATED_STATE, not UPLOAD_ALREADY_EXISTS (that
+    // code is for the narrower race where status is still 'created' but an
+    // UploadedAccessLog row already exists).
+    expect(second.json()).toEqual({ error: { code: 'ANALYSIS_NOT_IN_CREATED_STATE', message: expect.any(String) } });
   });
 
   it('T-08: an oversized upload is rejected and leaves no Storage/DB/Queue residue', async () => {
@@ -143,6 +156,7 @@ describe('analyses routes', () => {
         headers: { 'content-type': contentType },
       });
       expect(response.statusCode).toBe(413);
+      expect(response.json()).toEqual({ error: { code: 'UPLOAD_TOO_LARGE', message: expect.any(String) } });
 
       const analysis = await new PrismaAnalysisRepository(deps.prisma).findById(analysisId);
       expect(analysis?.status).toBe('created');
@@ -175,16 +189,52 @@ describe('analyses routes', () => {
       headers: { 'content-type': 'multipart/form-data; boundary=empty' },
     });
     expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: { code: 'FILE_REQUIRED', message: expect.any(String) } });
   });
 
   it('GET /analyses/:analysisId returns 404 for an unknown id', async () => {
     const response = await app.inject({ method: 'GET', url: '/analyses/nonexistent-id' });
     expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: { code: 'ANALYSIS_NOT_FOUND', message: expect.any(String) } });
+  });
+
+  it('GET /analyses/:analysisId returns an AnalysisDetailDto with originalFileName/fileSizeBytes from UploadedAccessLog, never a storageKey', async () => {
+    const { analysisId } = await createProjectAndAnalysis();
+    const { body, contentType } = buildMultipartUpload({
+      fieldName: 'file',
+      filename: 'valid.log',
+      content: readFixture('valid.log'),
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/analyses/${analysisId}/upload`,
+      payload: body,
+      headers: { 'content-type': contentType },
+    });
+
+    const response = await app.inject({ method: 'GET', url: `/analyses/${analysisId}` });
+    expect(response.statusCode).toBe(200);
+    const dto = response.json();
+    expect(dto).toMatchObject({ id: analysisId, status: 'uploaded', originalFileName: 'valid.log' });
+    expect(typeof dto.fileSizeBytes).toBe('number');
+    expect(dto).not.toHaveProperty('storageKey');
+    expect(dto).not.toHaveProperty('metadata');
   });
 
   it('GET /analyses/:analysisId/observations returns 404 before an ObservationSet exists', async () => {
     const { analysisId } = await createProjectAndAnalysis();
     const response = await app.inject({ method: 'GET', url: `/analyses/${analysisId}/observations` });
     expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: { code: 'OBSERVATION_SET_NOT_READY', message: expect.any(String) } });
+  });
+
+  it('GET /analyses/:analysisId/observations returns 409 ANALYSIS_FAILED for a Fatal Analysis, not a generic not-ready', async () => {
+    const { analysisId } = await createProjectAndAnalysis();
+    const analysisRepository = new PrismaAnalysisRepository(deps.prisma);
+    await analysisRepository.updateStatus(analysisId, 'failed', { analyzerStatus: 'failed' });
+
+    const response = await app.inject({ method: 'GET', url: `/analyses/${analysisId}/observations` });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ error: { code: 'ANALYSIS_FAILED', message: expect.any(String) } });
   });
 });

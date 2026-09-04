@@ -2,10 +2,12 @@ import type { Analysis, AnalysisStatus } from '@polaris/domain';
 import type { PrismaClientLike } from '../client.js';
 import { toPrismaAnalysisStatus, toPrismaAnalyzerStatus } from '../enum-mappers.js';
 import { DbError, mapPrismaError } from '../errors.js';
+import { toDomainObservationSetRecord } from '../observation-set/mapper.js';
 import { assertValidAnalysisStatusTransition } from '../status-transition.js';
+import { toDomainUploadedAccessLog } from '../uploaded-access-log/mapper.js';
 import type { AnalysisRepository } from './analysis-repository.js';
 import { toDomainAnalysis } from './mapper.js';
-import type { CreateAnalysisPersistenceInput, UpdateAnalysisPersistenceFields } from './types.js';
+import type { AnalysisListItem, CreateAnalysisPersistenceInput, UpdateAnalysisPersistenceFields } from './types.js';
 
 function buildUpdateData(status: AnalysisStatus, fields?: UpdateAnalysisPersistenceFields) {
   const metadata = fields?.metadata;
@@ -56,6 +58,42 @@ export class PrismaAnalysisRepository implements AnalysisRepository {
     try {
       const records = await this.client.analysis.findMany({ where: { projectId } });
       return records.map(toDomainAnalysis);
+    } catch (error) {
+      throw mapPrismaError(error);
+    }
+  }
+
+  async listSummariesByProjectId(projectId: string): Promise<AnalysisListItem[]> {
+    try {
+      const records = await this.client.analysis.findMany({
+        where: { projectId },
+        orderBy: { createdAt: 'desc' },
+        include: { uploadedAccessLog: true, observationSet: true },
+      });
+      return records.map((record) => {
+        const uploadedAccessLog =
+          record.uploadedAccessLog !== null ? toDomainUploadedAccessLog(record.uploadedAccessLog) : null;
+
+        // A row whose stored ObservationSet fails validation (old schema,
+        // corrupted data) degrades only its own requestCount to `undefined`
+        // rather than failing the whole list (40_Sprint_5_Plan_Review.md F-01).
+        let requestCount: number | undefined;
+        if (record.observationSet !== null) {
+          try {
+            requestCount = toDomainObservationSetRecord(record.observationSet).data.overview.totalRequests;
+          } catch {
+            requestCount = undefined;
+          }
+        }
+
+        return {
+          ...toDomainAnalysis(record),
+          ...(uploadedAccessLog !== null
+            ? { originalFileName: uploadedAccessLog.originalFileName, fileSizeBytes: uploadedAccessLog.sizeBytes }
+            : {}),
+          ...(requestCount !== undefined ? { requestCount } : {}),
+        };
+      });
     } catch (error) {
       throw mapPrismaError(error);
     }

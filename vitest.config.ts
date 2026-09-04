@@ -18,7 +18,14 @@ config({ path: path.join(repoRoot, '.env') });
 export default defineConfig({
   root: repoRoot,
   test: {
-    include: ['{apps,packages}/*/src/**/*.test.ts'],
+    // Backend-only (F-06, 41_Sprint_5_Plan_Final_Review.md) — apps/web and
+    // apps/product-e2e each have their own Vitest config with the Vue
+    // plugin + happy-dom, run via their own `yarn workspace ... run test`.
+    // A bare `{apps,packages}/*` glob here would double-run their tests
+    // through `yarn test:backend` (re-introducing the double-execution
+    // F-03 was meant to fix) and could fail to transform .vue files anyway
+    // since this config has no Vue plugin registered.
+    include: ['packages/*/src/**/*.test.ts', 'apps/{api,worker}/src/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/dist/**'],
     // packages/db's PostgreSQL integration tests share one beforeEach
     // resetDatabase() — safe only when test files never run concurrently

@@ -47,6 +47,7 @@ export async function buildApiDeps(maxUploadBytes = 52428800): Promise<ApiDeps &
     analyzerQueue,
     maxUploadBytes,
     rawLogRetentionHours: 24,
+    corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
     close: async () => {
       await analyzerQueue.close();
       connection.disconnect();

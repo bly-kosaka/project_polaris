@@ -25,6 +25,7 @@ async function main(): Promise<void> {
     analyzerQueue: createAnalyzerQueue(connection),
     maxUploadBytes: env.MAX_UPLOAD_BYTES,
     rawLogRetentionHours: env.RAW_LOG_RETENTION_HOURS,
+    corsOrigin: env.CORS_ORIGIN,
   };
 
   const app = await buildServer(deps);

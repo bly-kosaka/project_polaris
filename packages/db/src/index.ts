@@ -24,10 +24,11 @@ export {
   fromPrismaAnalysisExecutionStatus,
 } from './enum-mappers.js';
 
-export type { CreateProjectPersistenceInput, ProjectRepository } from './project/index.js';
+export type { CreateProjectPersistenceInput, ProjectListItem, ProjectRepository } from './project/index.js';
 export { toDomainProject, PrismaProjectRepository } from './project/index.js';
 
 export type {
+  AnalysisListItem,
   CreateAnalysisPersistenceInput,
   UpdateAnalysisPersistenceFields,
   AnalysisRepository,

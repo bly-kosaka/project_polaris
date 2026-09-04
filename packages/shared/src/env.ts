@@ -29,6 +29,11 @@ const envSchema = z.object({
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(52428800),
   RAW_LOG_RETENTION_HOURS: z.coerce.number().int().positive().default(24),
 
+  // Never '*' (39_Development_Setup_and_Fifth_Sprint.md §16) — apps/api's
+  // buildServer() reads this from ApiDeps, never process.env directly
+  // (40_Sprint_5_Plan_Review.md F-04).
+  CORS_ORIGIN: z.string().min(1).default('http://localhost:5173'),
+
   OPENAI_API_KEY: z.string().optional(),
   AI_EXPLANATION_MODEL: z.string().optional(),
   AI_CHAT_MODEL: z.string().optional(),
