@@ -8,9 +8,14 @@ import type { AIStatus } from '../../types/dto';
  * Result Overview/Data Limitation/Aggregation (md/44 §67 — those stay
  * operable). failed -> md/44 §68's exact copy, which never says the
  * analysis itself failed, plus a Retry button. not_requested/success render
- * nothing here — success is shown via OverallUrgencyCard/AISummary/FindingList.
+ * nothing here by default — success is shown via
+ * OverallUrgencyCard/AISummary/FindingList. `stuck` is the
+ * 48_Sprint_6_Final_ReReview.md M-01 case: the initial AI enqueue itself
+ * never happened at all (distinct from `failed`, where AI genuinely ran and
+ * could not produce a result) — same Retry mechanism, different copy so it
+ * doesn't misreport what happened.
  */
-defineProps<{ aiStatus: AIStatus }>();
+defineProps<{ aiStatus: AIStatus; stuck?: boolean }>();
 const emit = defineEmits<{ retry: [] }>();
 </script>
 
@@ -23,6 +28,16 @@ const emit = defineEmits<{ retry: [] }>();
       Analyzerによる集計結果は利用できます。
       <br />
       必要に応じて再試行してください。
+    </p>
+    <button type="button" class="ai-status-panel__retry" @click="emit('retry')">再試行</button>
+  </NoticePanel>
+  <NoticePanel v-else-if="aiStatus === 'not_requested' && stuck" title="AI説明" variant="warning">
+    <p class="ai-status-panel__message">
+      AIによる説明の生成を開始できませんでした。
+      <br />
+      Analyzerによる集計結果は利用できます。
+      <br />
+      再試行してください。
     </p>
     <button type="button" class="ai-status-panel__retry" @click="emit('retry')">再試行</button>
   </NoticePanel>

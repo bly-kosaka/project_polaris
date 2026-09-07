@@ -151,4 +151,54 @@ describe('recoverAiExplanationEnqueue', () => {
     const state = await job?.getState();
     expect(state).not.toBe('failed');
   }, 15000);
+
+  it('M-02 (48_Sprint_6_Final_ReReview.md): finalizes directly to completed/failed when a BullMQ-failed job left Analysis stuck at aiStatus=running', async () => {
+    const analysisId = await createAnalysisAtAnalyzerResultReady();
+    const analysisRepository = new PrismaAnalysisRepository(prisma);
+    // Simulates the Job Handler having claimed the job (explaining/running)
+    // and run the Provider to exhaustion, but the LAST attempt's own
+    // persistAiExplanationFailure call itself failing (e.g. a transient DB
+    // outage) — Analysis.status/.aiStatus never got to reflect the
+    // already-exhausted Provider attempts (BullMQ = failed, PostgreSQL =
+    // explaining/running).
+    await analysisRepository.compareAndSetStatus(analysisId, 'analyzer_result_ready', 'explaining', { aiStatus: 'running' });
+
+    const worker = new Worker(
+      AI_EXPLANATION_QUEUE,
+      async () => {
+        throw new Error('simulated: Provider attempts exhausted, terminal persist unreachable');
+      },
+      { connection: workerConnection, concurrency: 1 },
+    );
+    try {
+      await worker.waitUntilReady();
+      await aiExplanationQueue.add(
+        'ai-explanation',
+        { analysisId },
+        { jobId: buildAiExplanationJobId(analysisId), attempts: 1 },
+      );
+
+      const deadline = Date.now() + 5000;
+      let failedState: string | undefined;
+      while (Date.now() < deadline && failedState !== 'failed') {
+        const job = await aiExplanationQueue.getJob(buildAiExplanationJobId(analysisId));
+        failedState = await job?.getState();
+        if (failedState !== 'failed') await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(failedState).toBe('failed');
+    } finally {
+      await worker.close();
+    }
+
+    const before = await analysisRepository.findById(analysisId);
+    expect(before?.status).toBe('explaining'); // still stuck
+    expect(before?.aiStatus).toBe('running');
+
+    const outcome = await recoverAiExplanationEnqueue(analysisId, { prisma, aiExplanationQueue });
+    expect(outcome).toBe('finalized_as_failed');
+
+    const after = await analysisRepository.findById(analysisId);
+    expect(after?.status).toBe('completed');
+    expect(after?.aiStatus).toBe('failed');
+  }, 15000);
 });

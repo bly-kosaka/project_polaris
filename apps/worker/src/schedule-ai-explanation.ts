@@ -44,6 +44,12 @@ export async function scheduleInitialAiExplanation(analysisId: string, deps: Wor
     // already_completed: persistAiExplanationSuccess's own transaction
     // already set aiStatus=success as part of the same commit that created
     // the AIExplanationRecord — nothing further to reconcile.
+    //
+    // finalized_as_failed (48_Sprint_6_Final_ReReview.md M-02): unreachable
+    // from this call site in practice (a brand-new Analysis can't already
+    // have a terminal BullMQ job), but if it ever were reached,
+    // recoverAiExplanationEnqueue() already persisted the terminal failure
+    // directly — writing aiStatus=queued over that would be wrong.
   } catch {
     // Never turn a successful Analyzer job into a failure (§54).
   }

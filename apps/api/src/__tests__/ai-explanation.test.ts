@@ -124,6 +124,32 @@ describe('ai-explanation routes', () => {
       expect(response.json()).toEqual({ error: { code: 'AI_EXPLANATION_ALREADY_EXISTS', message: expect.any(String) } });
     });
 
+    it('M-01 (48_Sprint_6_Final_ReReview.md): recovers an Analysis stuck at aiStatus=not_requested with no Queue job at all, without forcing status to completed', async () => {
+      // createAnalysisReadyForAiExplanation never calls
+      // scheduleInitialAiExplanation, so this is naturally the exact stuck
+      // state M-01 describes: the initial AI enqueue never happened at all
+      // (e.g. a Redis outage at the moment persistAnalyzerSuccess committed).
+      const { analysisId } = await createAnalysisReadyForAiExplanation(deps);
+      const analysisRepository = new PrismaAnalysisRepository(deps.prisma);
+      const before = await analysisRepository.findById(analysisId);
+      expect(before?.status).toBe('analyzer_result_ready');
+      expect(before?.aiStatus).toBe('not_requested');
+
+      const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry` });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ status: 'enqueued' });
+
+      const after = await analysisRepository.findById(analysisId);
+      // A hardcoded 'completed' CAS anchor would have silently no-op'd here
+      // (the row is still at 'analyzer_result_ready') — the anchor must be
+      // the Analysis's own current status, not an assumption about it.
+      expect(after?.status).toBe('analyzer_result_ready');
+      expect(after?.aiStatus).toBe('queued');
+
+      const job = await deps.aiExplanationQueue.getJob(buildAiExplanationJobId(analysisId));
+      expect(job).toBeDefined();
+    });
+
     it('T-AI-03 (API half): a terminal AI failure with no Queue job enqueues a fresh job and reconciles aiStatus to queued, leaving status at completed', async () => {
       const { analysisId } = await createAnalysisReadyForAiExplanation(deps);
       const analysisRepository = new PrismaAnalysisRepository(deps.prisma);

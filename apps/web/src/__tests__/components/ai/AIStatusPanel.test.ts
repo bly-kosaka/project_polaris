@@ -29,6 +29,23 @@ describe('AIStatusPanel', () => {
 
   it('renders nothing for not_requested/success — those states are shown elsewhere', () => {
     expect(mount(AIStatusPanel, { props: { aiStatus: 'not_requested' } }).text()).toBe('');
+    expect(mount(AIStatusPanel, { props: { aiStatus: 'not_requested', stuck: false } }).text()).toBe('');
     expect(mount(AIStatusPanel, { props: { aiStatus: 'success' } }).text()).toBe('');
+  });
+
+  it('M-01 (48_Sprint_6_Final_ReReview.md): stuck not_requested reports that the AI generation never started, distinct from a genuine failed attempt, with Retry', async () => {
+    const wrapper = mount(AIStatusPanel, { props: { aiStatus: 'not_requested', stuck: true } });
+    expect(wrapper.text()).toContain('AIによる説明の生成を開始できませんでした');
+    expect(wrapper.text()).toContain('Analyzerによる集計結果は利用できます');
+    // Distinct copy from the `failed` state — it never ran, so it must not
+    // claim it "生成できませんでした" (ran and could not produce a result).
+    expect(wrapper.text()).not.toContain('生成できませんでした');
+    expect(wrapper.text()).not.toContain('解析全体が失敗');
+    expect(wrapper.text()).not.toMatch(/問題(は)?ありません|安全です/);
+
+    const button = wrapper.find('button');
+    expect(button.exists()).toBe(true);
+    await button.trigger('click');
+    expect(wrapper.emitted('retry')).toHaveLength(1);
   });
 });

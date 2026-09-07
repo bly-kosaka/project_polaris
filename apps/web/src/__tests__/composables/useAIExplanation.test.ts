@@ -39,6 +39,7 @@ function makeHost() {
       return () =>
         h('div', [
           h('span', { class: 'ai-status' }, state.aiStatus.value),
+          h('span', { class: 'ai-stuck' }, String(state.stuck.value)),
           h('button', { class: 'retry-button', onClick: () => void state.retry() }, 'retry'),
         ]);
     },
@@ -125,6 +126,45 @@ describe('useAIExplanation', () => {
 
     await vi.advanceTimersByTimeAsync(1000);
     await vi.waitFor(() => expect(getAnalysis).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(getAiExplanation).toHaveBeenCalledTimes(1));
+    expect(wrapper.find('.ai-status').text()).toBe('success');
+
+    wrapper.unmount();
+  });
+
+  it('M-01 (48_Sprint_6_Final_ReReview.md): stops polling once aiStatus is stuck at not_requested, and retry() recovers it', async () => {
+    const getAnalysis = vi
+      .spyOn(analysesApi, 'getAnalysis')
+      .mockResolvedValueOnce(analysisAt('not_requested')) // first poll: tolerated as a normal race
+      .mockResolvedValueOnce(analysisAt('not_requested')) // second poll: stuck — the initial enqueue genuinely failed
+      .mockResolvedValueOnce(analysisAt('queued'))
+      .mockResolvedValueOnce(analysisAt('success'));
+    const getAiExplanation = vi.spyOn(aiExplanationApi, 'getAiExplanation').mockResolvedValue(explanationPayload());
+    const retryAiExplanation = vi.spyOn(aiExplanationApi, 'retryAiExplanation').mockResolvedValue({ status: 'enqueued' });
+
+    const wrapper = mount(makeHost(), { props: { analysisId: 'a1' } });
+    await vi.waitFor(() => expect(getAnalysis).toHaveBeenCalledTimes(1));
+    expect(wrapper.find('.ai-status').text()).toBe('not_requested');
+    expect(wrapper.find('.ai-stuck').text()).toBe('false'); // one observation is tolerated, not yet stuck
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(() => expect(getAnalysis).toHaveBeenCalledTimes(2));
+    expect(wrapper.find('.ai-stuck').text()).toBe('true'); // stuck — polling stops here
+
+    // Polling genuinely stopped — no further getAnalysis calls, ever.
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(getAnalysis).toHaveBeenCalledTimes(2);
+
+    // AI Explanation can be scheduled again from this stuck state.
+    await wrapper.find('.retry-button').trigger('click');
+    await vi.waitFor(() => expect(retryAiExplanation).toHaveBeenCalledTimes(1));
+    expect(wrapper.find('.ai-stuck').text()).toBe('false');
+
+    await vi.waitFor(() => expect(getAnalysis).toHaveBeenCalledTimes(3));
+    expect(wrapper.find('.ai-status').text()).toBe('queued');
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(() => expect(getAnalysis).toHaveBeenCalledTimes(4));
     await vi.waitFor(() => expect(getAiExplanation).toHaveBeenCalledTimes(1));
     expect(wrapper.find('.ai-status').text()).toBe('success');
 

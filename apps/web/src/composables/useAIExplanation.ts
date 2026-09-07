@@ -9,6 +9,19 @@ const TERMINAL_AI_STATUSES = new Set<AIStatus>(['success', 'failed']);
 const POLL_INTERVAL_MS = 2000;
 
 /**
+ * `not_requested` is not itself a loading state (48_Sprint_6_Final_ReReview.md
+ * M-01) — it's only ever supposed to be momentary, since
+ * `scheduleInitialAiExplanation` runs synchronously right after Analyzer
+ * success and normally flips it to `queued` before this composable's first
+ * poll ever lands. If it's still `not_requested` on a SECOND consecutive
+ * poll, the initial enqueue itself genuinely failed (e.g. Redis was
+ * unreachable) and nothing will ever revisit it on its own — polling forever
+ * would just spin. One observation is tolerated as the ordinary race between
+ * that synchronous call committing and this poll landing.
+ */
+const NOT_REQUESTED_STUCK_THRESHOLD = 2;
+
+/**
  * Polls `GET /analyses/:id` — never `GET /analyses/:id/explanation` — until
  * `aiStatus` reaches a terminal value. `GET .../explanation` itself never
  * reports `aiStatus` in its own response shape (404 for
@@ -24,9 +37,12 @@ export function useAIExplanation(analysisId: string, intervalMs = POLL_INTERVAL_
   const aiExplanation = ref<AIExplanationDetailDto | null>(null);
   const error = ref<ApiError | null>(null);
   const isLoading = ref(true);
+  /** True once polling has stopped because the initial AI enqueue never happened at all (M-01). */
+  const stuck = ref(false);
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   let cancelled = false;
+  let notRequestedStreak = 0;
 
   async function fetchExplanationOnce(): Promise<void> {
     try {
@@ -45,6 +61,18 @@ export function useAIExplanation(analysisId: string, intervalMs = POLL_INTERVAL_
       const analysis = await getAnalysis(analysisId);
       if (cancelled) return;
       aiStatus.value = analysis.aiStatus;
+
+      if (analysis.aiStatus === 'not_requested') {
+        notRequestedStreak += 1;
+        if (notRequestedStreak >= NOT_REQUESTED_STUCK_THRESHOLD) {
+          isLoading.value = false;
+          stuck.value = true;
+          return;
+        }
+      } else {
+        notRequestedStreak = 0;
+      }
+
       if (TERMINAL_AI_STATUSES.has(analysis.aiStatus)) {
         isLoading.value = false;
         if (analysis.aiStatus === 'success') await fetchExplanationOnce();
@@ -64,12 +92,16 @@ export function useAIExplanation(analysisId: string, intervalMs = POLL_INTERVAL_
    * `Analysis.status` from 'completed' back through 'explaining' (decision
    * 7/9), which the one-shot Sprint 5 Processing-page polling never
    * observes since the user is already on the Result page when they click
-   * Retry.
+   * Retry. Also the recovery action for the `stuck` (M-01) state — the
+   * backend route this calls reconciles a never-enqueued `not_requested`
+   * exactly like a post-failure retry (48_Sprint_6_Final_ReReview.md M-01).
    */
   async function retry(): Promise<void> {
     error.value = null;
     aiExplanation.value = null;
     isLoading.value = true;
+    stuck.value = false;
+    notRequestedStreak = 0;
     try {
       await retryAiExplanation(analysisId);
     } catch (err) {
@@ -89,5 +121,5 @@ export function useAIExplanation(analysisId: string, intervalMs = POLL_INTERVAL_
     if (timer !== undefined) clearTimeout(timer);
   });
 
-  return { aiStatus, aiExplanation, error, isLoading, retry };
+  return { aiStatus, aiExplanation, error, isLoading, stuck, retry };
 }

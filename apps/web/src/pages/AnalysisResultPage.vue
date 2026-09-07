@@ -63,7 +63,7 @@ async function loadAnalysis(): Promise<void> {
 onMounted(() => void loadAnalysis());
 
 const { observationSet, error: observationError, isLoading } = useObservationSet(props.analysisId);
-const { aiStatus, aiExplanation, retry: retryAiExplanation } = useAIExplanation(props.analysisId);
+const { aiStatus, aiExplanation, stuck: aiStuck, retry: retryAiExplanation } = useAIExplanation(props.analysisId);
 
 type TabKey = 'path' | 'sourceIp' | 'status' | 'method' | 'userAgent' | 'time';
 
@@ -250,8 +250,9 @@ const drawerTitle = computed(() => {
       />
 
       <AIStatusPanel
-        v-if="aiStatus === 'queued' || aiStatus === 'running' || aiStatus === 'failed'"
+        v-if="aiStatus === 'queued' || aiStatus === 'running' || aiStatus === 'failed' || (aiStatus === 'not_requested' && aiStuck)"
         :ai-status="aiStatus"
+        :stuck="aiStuck"
         @retry="retryAiExplanation"
       />
       <template v-if="aiStatus === 'success' && aiExplanation">

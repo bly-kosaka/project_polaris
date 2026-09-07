@@ -57,18 +57,27 @@ export function registerAiExplanationRoutes(app: FastifyInstance, deps: ApiDeps)
 
     const result = await recoverAiExplanationEnqueue(analysisId, deps);
     if (result === 'enqueued' || result === 'retried' || result === 'already_queued') {
-      // Same-status CAS anchored on 'completed' (decision 9) — a no-op if
-      // the Analysis is actually still mid-flight (e.g. status is still
-      // 'analyzer_result_ready'/'explaining' from a still-running initial
-      // attempt), correcting Queue/DB drift rather than assuming
-      // 'already_queued' already implies a consistent DB row (F-05).
-      await analysisRepository.compareAndSetStatus(analysisId, 'completed', 'completed', { aiStatus: 'queued' });
+      // Same-status CAS anchored on the Analysis's OWN current status — not
+      // hardcoded to 'completed' (48_Sprint_6_Final_ReReview.md M-01). This
+      // endpoint must recover two distinct cases with the same call: a
+      // post-terminal-failure retry (status already 'completed') AND an
+      // initial AI enqueue that never even succeeded once (aiStatus stuck at
+      // 'not_requested', status still 'analyzer_result_ready' — a hardcoded
+      // 'completed' anchor silently no-ops on this case, since the CAS's
+      // WHERE clause never matches a row still at 'analyzer_result_ready').
+      // A no-op is still correct if the Analysis has moved on since the read
+      // above (e.g. the Worker's own claim already advanced it) — the CAS's
+      // WHERE clause simply matches zero rows.
+      await analysisRepository.compareAndSetStatus(analysisId, analysis.status, analysis.status, { aiStatus: 'queued' });
     }
     // already_running: the Worker's own claim CAS is the sole writer of
     // that transition (decision 7a's reasoning, mirrored here).
     // already_completed: an AIExplanationRecord appeared between the check
     // above and this call — a benign race, reported rather than erroring
     // (its own transaction already reconciled aiStatus=success).
+    // finalized_as_failed (M-02): recoverAiExplanationEnqueue itself already
+    // persisted the terminal failure directly — writing aiStatus=queued over
+    // that would be wrong, so this deliberately falls through to no write.
 
     return reply.send({ status: result });
   });
