@@ -9,6 +9,8 @@ export interface Project {
     hostname?: string;
   };
   status: ProjectStatus;
+  /** The Account that owns this Project — never client-supplied (Sprint 7). */
+  ownerAccountId: string;
   createdAt: string;
   updatedAt: string;
 }

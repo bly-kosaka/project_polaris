@@ -55,6 +55,15 @@ export class PrismaAnalysisRepository implements AnalysisRepository {
     }
   }
 
+  async findByIdForOwner(id: string, ownerAccountId: string): Promise<Analysis | null> {
+    try {
+      const record = await this.client.analysis.findFirst({ where: { id, project: { ownerAccountId } } });
+      return record !== null ? toDomainAnalysis(record) : null;
+    } catch (error) {
+      throw mapPrismaError(error);
+    }
+  }
+
   async listByProjectId(projectId: string): Promise<Analysis[]> {
     try {
       const records = await this.client.analysis.findMany({ where: { projectId } });

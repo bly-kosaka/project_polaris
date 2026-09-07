@@ -5,6 +5,8 @@ export interface CreateProjectPersistenceInput {
   description?: string;
   primaryUrl?: string;
   hostname?: string;
+  /** Set from the Authenticated Account server-side — never client-supplied (Sprint 7). */
+  ownerAccountId: string;
 }
 
 /**

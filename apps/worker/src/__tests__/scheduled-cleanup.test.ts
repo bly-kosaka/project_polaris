@@ -7,7 +7,7 @@ import { Worker } from 'bullmq';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { handleCleanupJob } from '../cleanup-job-handler.js';
 import { handleRawLogDeleteJob } from '../raw-log-delete-job-handler.js';
-import { buildWorkerDeps, resetDatabase } from './worker-test-helpers.js';
+import { buildWorkerDeps, createTestAccount, resetDatabase } from './worker-test-helpers.js';
 
 /**
  * M-02 (36_Sprint_4_Review.md): `enqueueCleanupJob()`/`handleCleanupJob()`
@@ -30,7 +30,8 @@ describe('scheduled cleanup (M-02)', () => {
   });
 
   it('a registered scheduler produces a Cleanup Job that a real Worker picks up and processes', async () => {
-    const project = await new PrismaProjectRepository(deps.prisma).create({ name: `Scheduled Cleanup ${Date.now()}` });
+    const account = await createTestAccount();
+    const project = await new PrismaProjectRepository(deps.prisma).create({ name: `Scheduled Cleanup ${Date.now()}`, ownerAccountId: account.id });
     const analysis = await new PrismaAnalysisRepository(deps.prisma).create({ projectId: project.id });
     const storageKey = buildRawLogStorageKey(analysis.id);
     await deps.storage.putObject({ key: storageKey, body: Readable.from(['line\n']) });

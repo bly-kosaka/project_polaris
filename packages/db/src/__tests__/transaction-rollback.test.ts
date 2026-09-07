@@ -4,7 +4,7 @@ import { PrismaObservationSetRepository } from '../observation-set/prisma-observ
 import { PrismaAnalysisRepository } from '../analysis/prisma-analysis-repository.js';
 import { PrismaProjectRepository } from '../project/prisma-project-repository.js';
 import { persistAnalyzerSuccess } from '../persist-analyzer-result.js';
-import { buildValidObservationSet, resetDatabase } from './db-test-helpers.js';
+import { buildValidObservationSet, createTestAccount, resetDatabase } from './db-test-helpers.js';
 
 describe('persistAnalyzerSuccess transaction rollback (F-05)', () => {
   beforeEach(async () => {
@@ -18,7 +18,8 @@ describe('persistAnalyzerSuccess transaction rollback (F-05)', () => {
     // is the real atomicity proof: an earlier draft that inserted the same
     // analysisId twice only ever failed on write #1 itself, never touching
     // write #2 (32_Sprint_3_Plan_Review.md F-05).
-    const project = await new PrismaProjectRepository(prisma).create({ name: 'Rollback Test Project' });
+    const account = await createTestAccount(prisma);
+    const project = await new PrismaProjectRepository(prisma).create({ name: 'Rollback Test Project', ownerAccountId: account.id });
     const analysis = await new PrismaAnalysisRepository(prisma).create({ projectId: project.id });
     const observationSet = await buildValidObservationSet();
 

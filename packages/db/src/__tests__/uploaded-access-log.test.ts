@@ -3,7 +3,7 @@ import { prisma } from '../client.js';
 import { PrismaAnalysisRepository } from '../analysis/prisma-analysis-repository.js';
 import { PrismaProjectRepository } from '../project/prisma-project-repository.js';
 import { PrismaUploadedAccessLogRepository } from '../uploaded-access-log/prisma-uploaded-access-log-repository.js';
-import { resetDatabase } from './db-test-helpers.js';
+import { createTestAccount, resetDatabase } from './db-test-helpers.js';
 
 describe('PrismaUploadedAccessLogRepository', () => {
   beforeEach(async () => {
@@ -11,7 +11,8 @@ describe('PrismaUploadedAccessLogRepository', () => {
   });
 
   async function createAnalysis() {
-    const project = await new PrismaProjectRepository(prisma).create({ name: 'Upload Test Project' });
+    const account = await createTestAccount(prisma);
+    const project = await new PrismaProjectRepository(prisma).create({ name: 'Upload Test Project', ownerAccountId: account.id });
     return new PrismaAnalysisRepository(prisma).create({ projectId: project.id });
   }
 

@@ -14,12 +14,18 @@ async function resetDatabase(): Promise<void> {
   await prisma.uploadedAccessLog.deleteMany();
   await prisma.analysis.deleteMany();
   await prisma.project.deleteMany();
+  await prisma.account.deleteMany();
 }
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:16379';
 
+async function createTestAccount(): Promise<{ id: string }> {
+  return prisma.account.create({ data: { authProvider: 'clerk', authSubject: `test-subject-${Date.now()}-${Math.random()}`, emailVerified: true } });
+}
+
 async function createAnalysis(): Promise<string> {
-  const project = await new PrismaProjectRepository(prisma).create({ name: `AI Recovery Test ${Date.now()}` });
+  const account = await createTestAccount();
+  const project = await new PrismaProjectRepository(prisma).create({ name: `AI Recovery Test ${Date.now()}`, ownerAccountId: account.id });
   const analysis = await new PrismaAnalysisRepository(prisma).create({ projectId: project.id });
   return analysis.id;
 }
@@ -32,7 +38,8 @@ async function createAnalysis(): Promise<string> {
  * real, legal transitions rather than jumping straight to `completed`.
  */
 async function createAnalysisAtAnalyzerResultReady(): Promise<string> {
-  const project = await new PrismaProjectRepository(prisma).create({ name: `AI Recovery Test ${Date.now()}` });
+  const account = await createTestAccount();
+  const project = await new PrismaProjectRepository(prisma).create({ name: `AI Recovery Test ${Date.now()}`, ownerAccountId: account.id });
   const analysisRepository = new PrismaAnalysisRepository(prisma);
   const analysis = await analysisRepository.create({ projectId: project.id });
   await analysisRepository.updateStatus(analysis.id, 'uploaded');

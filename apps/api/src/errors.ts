@@ -21,6 +21,10 @@ export type ApiErrorCode =
   | 'AI_EXPLANATION_NOT_READY'
   | 'AI_EXPLANATION_FAILED'
   | 'AI_EXPLANATION_ALREADY_EXISTS'
+  | 'AUTHENTICATION_REQUIRED'
+  | 'AUTHENTICATION_INVALID'
+  | 'AUTHENTICATION_UNAVAILABLE'
+  | 'EMAIL_VERIFICATION_REQUIRED'
   | 'INTERNAL_ERROR';
 
 export function sendApiError(reply: FastifyReply, status: number, code: ApiErrorCode, message: string) {

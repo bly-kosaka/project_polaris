@@ -1,3 +1,4 @@
+import type { AuthAdapter } from '@polaris/auth';
 import type { prisma } from '@polaris/db';
 import type { AIExplanationJobData, AnalyzerJobData } from '@polaris/queue';
 import type { TemporaryObjectStorage } from '@polaris/storage';
@@ -8,6 +9,13 @@ export interface ApiDeps {
   storage: TemporaryObjectStorage;
   analyzerQueue: Queue<AnalyzerJobData>;
   aiExplanationQueue: Queue<AIExplanationJobData>;
+  /**
+   * Plain injected field, constructed once at bootstrap
+   * (50_Development_Setup_and_Seventh_Sprint.md decision 6) — the real
+   * `ClerkAuthAdapter` in production, a `FakeAuthAdapter` in tests, exactly
+   * the same seam `WorkerDeps.aiProvider` already established in Sprint 6.
+   */
+  authAdapter: AuthAdapter;
   maxUploadBytes: number;
   rawLogRetentionHours: number;
   /**

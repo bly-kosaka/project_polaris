@@ -1,6 +1,7 @@
 import { PrismaAIExplanationRepository, PrismaAnalysisRepository, PrismaObservationSetRepository } from '@polaris/db';
 import { recoverAiExplanationEnqueue } from '@polaris/queue';
 import type { FastifyInstance } from 'fastify';
+import { requireOwnedAnalysis } from '../auth/require-owned-analysis.js';
 import type { ApiDeps } from '../deps.js';
 import { toAIExplanationDetailDto } from '../dto/ai-explanation.js';
 import { sendApiError } from '../errors.js';
@@ -12,10 +13,8 @@ import { sendApiError } from '../errors.js';
 export function registerAiExplanationRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.get<{ Params: { analysisId: string } }>('/analyses/:analysisId/explanation', async (req, reply) => {
     const { analysisId } = req.params;
-    const analysis = await new PrismaAnalysisRepository(deps.prisma).findById(analysisId);
-    if (analysis === null) {
-      return sendApiError(reply, 404, 'ANALYSIS_NOT_FOUND', 'Analysis not found');
-    }
+    const analysis = await requireOwnedAnalysis(deps, req, reply, analysisId);
+    if (analysis === undefined) return;
     if (analysis.aiStatus === 'failed') {
       return sendApiError(reply, 409, 'AI_EXPLANATION_FAILED', 'AI Explanation failed for this Analysis');
     }
@@ -34,10 +33,8 @@ export function registerAiExplanationRoutes(app: FastifyInstance, deps: ApiDeps)
     const { analysisId } = req.params;
     const analysisRepository = new PrismaAnalysisRepository(deps.prisma);
 
-    const analysis = await analysisRepository.findById(analysisId);
-    if (analysis === null) {
-      return sendApiError(reply, 404, 'ANALYSIS_NOT_FOUND', 'Analysis not found');
-    }
+    const analysis = await requireOwnedAnalysis(deps, req, reply, analysisId);
+    if (analysis === undefined) return;
 
     const observationSetRecord = await new PrismaObservationSetRepository(deps.prisma).findByAnalysisId(analysisId);
     const analyzerReady = analysis.analyzerStatus === 'success' || analysis.analyzerStatus === 'partial';

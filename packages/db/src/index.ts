@@ -25,6 +25,9 @@ export {
   fromPrismaAnalysisExecutionStatus,
 } from './enum-mappers.js';
 
+export type { CreateAccountInput, AccountRepository } from './account/index.js';
+export { toDomainAccount, PrismaAccountRepository } from './account/index.js';
+
 export type { CreateProjectPersistenceInput, ProjectListItem, ProjectRepository } from './project/index.js';
 export { toDomainProject, PrismaProjectRepository } from './project/index.js';
 

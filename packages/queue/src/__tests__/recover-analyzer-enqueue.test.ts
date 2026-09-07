@@ -13,12 +13,18 @@ async function resetDatabase(): Promise<void> {
   await prisma.uploadedAccessLog.deleteMany();
   await prisma.analysis.deleteMany();
   await prisma.project.deleteMany();
+  await prisma.account.deleteMany();
 }
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:16379';
 
+async function createTestAccount(): Promise<{ id: string }> {
+  return prisma.account.create({ data: { authProvider: 'clerk', authSubject: `test-subject-${Date.now()}-${Math.random()}`, emailVerified: true } });
+}
+
 async function createUploadedAnalysis(): Promise<string> {
-  const project = await new PrismaProjectRepository(prisma).create({ name: `Recovery Test ${Date.now()}` });
+  const account = await createTestAccount();
+  const project = await new PrismaProjectRepository(prisma).create({ name: `Recovery Test ${Date.now()}`, ownerAccountId: account.id });
   const analysis = await new PrismaAnalysisRepository(prisma).create({ projectId: project.id });
   await persistUploadedAccessLog(prisma, {
     analysisId: analysis.id,
@@ -60,7 +66,8 @@ describe('recoverAnalyzerEnqueue (T-18, M-01R)', () => {
   });
 
   it('is a no-op for an Analysis that is not in the uploaded state', async () => {
-    const project = await new PrismaProjectRepository(prisma).create({ name: `Recovery Noop ${Date.now()}` });
+    const account = await createTestAccount();
+    const project = await new PrismaProjectRepository(prisma).create({ name: `Recovery Noop ${Date.now()}`, ownerAccountId: account.id });
     const analysis = await new PrismaAnalysisRepository(prisma).create({ projectId: project.id });
 
     const outcome = await recoverAnalyzerEnqueue(analysis.id, { prisma, analyzerQueue });

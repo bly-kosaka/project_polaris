@@ -5,7 +5,7 @@ import { Readable } from 'node:stream';
 import type { Job } from 'bullmq';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { handleRawLogDeleteJob } from '../raw-log-delete-job-handler.js';
-import { buildWorkerDeps, resetDatabase } from './worker-test-helpers.js';
+import { buildWorkerDeps, createTestAccount, resetDatabase } from './worker-test-helpers.js';
 
 function fakeDeleteJob(analysisId: string): Job<RawLogDeleteJobData> {
   return { data: { analysisId } } as unknown as Job<RawLogDeleteJobData>;
@@ -24,7 +24,8 @@ describe('handleRawLogDeleteJob', () => {
   });
 
   it('T-07/T-22: retries a previously-failed delete and marks it deleted/success', async () => {
-    const project = await new PrismaProjectRepository(deps.prisma).create({ name: 'Delete Retry Test' });
+    const account = await createTestAccount();
+    const project = await new PrismaProjectRepository(deps.prisma).create({ name: 'Delete Retry Test', ownerAccountId: account.id });
     const analysis = await new PrismaAnalysisRepository(deps.prisma).create({ projectId: project.id });
     const storageKey = buildRawLogStorageKey(analysis.id);
     const repository = new PrismaUploadedAccessLogRepository(deps.prisma);
@@ -50,7 +51,8 @@ describe('handleRawLogDeleteJob', () => {
   });
 
   it('is a no-op when the UploadedAccessLog is already deleted', async () => {
-    const project = await new PrismaProjectRepository(deps.prisma).create({ name: 'Delete Retry Noop Test' });
+    const account = await createTestAccount();
+    const project = await new PrismaProjectRepository(deps.prisma).create({ name: 'Delete Retry Noop Test', ownerAccountId: account.id });
     const analysis = await new PrismaAnalysisRepository(deps.prisma).create({ projectId: project.id });
     const storageKey = buildRawLogStorageKey(analysis.id);
     const repository = new PrismaUploadedAccessLogRepository(deps.prisma);

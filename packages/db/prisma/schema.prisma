@@ -86,18 +86,42 @@ enum AnalysisExecutionStatus {
   FAILED
 }
 
+// authSubject is the external-identity primary key (never email — accounts
+// can change email, and a future second Auth Provider must not collide on
+// it, 50_Development_Setup_and_Seventh_Sprint.md §25). Provider Credentials
+// (password/session tokens) are never stored here — only the identity
+// reference and a best-effort profile snapshot (Sprint 7 §4/§9). @unique on
+// its own, not @@unique([authProvider, authSubject]), is correct while
+// Clerk is the only Provider (Sprint 7's own scope) — see m-04 in
+// 52_Sprint_7_Plan_Final_Review.md for the future-multi-provider caveat.
+model Account {
+  id            String   @id @default(cuid())
+  authProvider  String
+  authSubject   String   @unique
+  email         String?
+  emailVerified Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  projects Project[]
+}
+
 model Project {
-  id          String        @id @default(cuid())
-  name        String
-  description String?
-  primaryUrl  String?
-  hostname    String?
-  status      ProjectStatus @default(ACTIVE)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id             String        @id @default(cuid())
+  name           String
+  description    String?
+  primaryUrl     String?
+  hostname       String?
+  status         ProjectStatus @default(ACTIVE)
+  ownerAccountId String
+  ownerAccount   Account       @relation(fields: [ownerAccountId], references: [id], onDelete: Restrict)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   analyses            Analysis[]
   knownInformationSet ProjectKnownInformation[]
+
+  @@index([ownerAccountId])
 }
 
 model Analysis {

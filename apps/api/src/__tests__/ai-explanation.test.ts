@@ -1,4 +1,4 @@
-import { PrismaAIExplanationRepository, PrismaAnalysisRepository, PrismaProjectRepository, persistAiExplanationFailure } from '@polaris/db';
+import { PrismaAIExplanationRepository, PrismaAccountRepository, PrismaAnalysisRepository, PrismaProjectRepository, persistAiExplanationFailure } from '@polaris/db';
 import { AI_EXPLANATION_QUEUE, buildAiExplanationJobId, createWorkerConnection } from '@polaris/queue';
 import type { FastifyInstance } from 'fastify';
 import { Worker } from 'bullmq';
@@ -7,6 +7,7 @@ import { buildServer } from '../server.js';
 import { buildApiDeps, createAnalysisReadyForAiExplanation, resetDatabase } from './api-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:16379';
+const AUTH = { authorization: 'Bearer test-account' };
 
 function canned(groupId = 'path:whatever') {
   return {
@@ -43,14 +44,14 @@ describe('ai-explanation routes', () => {
 
   describe('GET /analyses/:analysisId/explanation', () => {
     it('returns 404 ANALYSIS_NOT_FOUND for an unknown Analysis', async () => {
-      const response = await app.inject({ method: 'GET', url: '/analyses/nonexistent-id/explanation' });
+      const response = await app.inject({ method: 'GET', url: '/analyses/nonexistent-id/explanation', headers: AUTH });
       expect(response.statusCode).toBe(404);
       expect(response.json()).toEqual({ error: { code: 'ANALYSIS_NOT_FOUND', message: expect.any(String) } });
     });
 
     it('returns 404 AI_EXPLANATION_NOT_READY before a record exists (covers not_requested/queued/running)', async () => {
       const { analysisId } = await createAnalysisReadyForAiExplanation(deps);
-      const response = await app.inject({ method: 'GET', url: `/analyses/${analysisId}/explanation` });
+      const response = await app.inject({ method: 'GET', url: `/analyses/${analysisId}/explanation`, headers: AUTH });
       expect(response.statusCode).toBe(404);
       expect(response.json()).toEqual({ error: { code: 'AI_EXPLANATION_NOT_READY', message: expect.any(String) } });
     });
@@ -59,7 +60,7 @@ describe('ai-explanation routes', () => {
       const { analysisId } = await createAnalysisReadyForAiExplanation(deps);
       await persistAiExplanationFailure(deps.prisma, { analysisId });
 
-      const response = await app.inject({ method: 'GET', url: `/analyses/${analysisId}/explanation` });
+      const response = await app.inject({ method: 'GET', url: `/analyses/${analysisId}/explanation`, headers: AUTH });
       expect(response.statusCode).toBe(409);
       expect(response.json()).toEqual({ error: { code: 'AI_EXPLANATION_FAILED', message: expect.any(String) } });
     });
@@ -75,7 +76,7 @@ describe('ai-explanation routes', () => {
         data: canned(),
       });
 
-      const response = await app.inject({ method: 'GET', url: `/analyses/${analysisId}/explanation` });
+      const response = await app.inject({ method: 'GET', url: `/analyses/${analysisId}/explanation`, headers: AUTH });
       expect(response.statusCode).toBe(200);
       const dto = response.json();
       expect(dto).toMatchObject({
@@ -94,16 +95,25 @@ describe('ai-explanation routes', () => {
 
   describe('POST /analyses/:analysisId/explanation/retry', () => {
     it('returns 404 ANALYSIS_NOT_FOUND for an unknown Analysis', async () => {
-      const response = await app.inject({ method: 'POST', url: '/analyses/nonexistent-id/explanation/retry' });
+      const response = await app.inject({ method: 'POST', url: '/analyses/nonexistent-id/explanation/retry', headers: AUTH });
       expect(response.statusCode).toBe(404);
       expect(response.json()).toEqual({ error: { code: 'ANALYSIS_NOT_FOUND', message: expect.any(String) } });
     });
 
     it('returns 409 OBSERVATION_SET_NOT_READY before the Analyzer has produced an ObservationSet', async () => {
-      const project = await new PrismaProjectRepository(deps.prisma).create({ name: 'Retry Precondition Test' });
+      const account = await new PrismaAccountRepository(deps.prisma).getOrCreateByAuthSubject({
+        authProvider: 'clerk',
+        authSubject: 'test-account',
+        email: 'test-account@example.com',
+        emailVerified: true,
+      });
+      const project = await new PrismaProjectRepository(deps.prisma).create({
+        name: 'Retry Precondition Test',
+        ownerAccountId: account.id,
+      });
       const analysis = await new PrismaAnalysisRepository(deps.prisma).create({ projectId: project.id });
 
-      const response = await app.inject({ method: 'POST', url: `/analyses/${analysis.id}/explanation/retry` });
+      const response = await app.inject({ method: 'POST', url: `/analyses/${analysis.id}/explanation/retry`, headers: AUTH });
       expect(response.statusCode).toBe(409);
       expect(response.json()).toEqual({ error: { code: 'OBSERVATION_SET_NOT_READY', message: expect.any(String) } });
     });
@@ -119,7 +129,7 @@ describe('ai-explanation routes', () => {
         data: canned(),
       });
 
-      const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry` });
+      const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry`, headers: AUTH });
       expect(response.statusCode).toBe(409);
       expect(response.json()).toEqual({ error: { code: 'AI_EXPLANATION_ALREADY_EXISTS', message: expect.any(String) } });
     });
@@ -135,7 +145,7 @@ describe('ai-explanation routes', () => {
       expect(before?.status).toBe('analyzer_result_ready');
       expect(before?.aiStatus).toBe('not_requested');
 
-      const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry` });
+      const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry`, headers: AUTH });
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({ status: 'enqueued' });
 
@@ -159,7 +169,7 @@ describe('ai-explanation routes', () => {
       // direct transition, packages/db/src/status-transition.ts).
       await persistAiExplanationFailure(deps.prisma, { analysisId });
 
-      const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry` });
+      const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry`, headers: AUTH });
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({ status: 'enqueued' });
 
@@ -181,7 +191,7 @@ describe('ai-explanation routes', () => {
       // failed), but Analysis.aiStatus is still stuck at 'failed'.
       await deps.aiExplanationQueue.add('ai-explanation', { analysisId }, { jobId: buildAiExplanationJobId(analysisId) });
 
-      const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry` });
+      const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry`, headers: AUTH });
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({ status: 'already_queued' });
 
@@ -214,7 +224,7 @@ describe('ai-explanation routes', () => {
         }
         expect(state).toBe('active');
 
-        const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry` });
+        const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry`, headers: AUTH });
         expect(response.statusCode).toBe(200);
         expect(response.json()).toEqual({ status: 'already_running' });
 

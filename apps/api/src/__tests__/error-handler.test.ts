@@ -45,7 +45,11 @@ describe('Global Error Boundary', () => {
     const secretDetail = 'connection to db.internal.prod:5432 refused — password authentication failed for user polaris';
     app = await buildServer({ ...deps, prisma: withFailingProjectFindMany(deps.prisma, secretDetail) });
 
-    const response = await app.inject({ method: 'GET', url: '/projects' });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/projects',
+      headers: { authorization: 'Bearer test-account' },
+    });
 
     expect(response.statusCode).toBe(500);
     expect(response.json()).toEqual({ error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' } });

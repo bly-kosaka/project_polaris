@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { analyzeAccessLog, type ObservationSet } from '@polaris/analyzer';
 import { PrismaAnalysisRepository } from '../analysis/prisma-analysis-repository.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
@@ -17,6 +18,20 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   await prisma.analysis.deleteMany();
   await prisma.projectKnownInformation.deleteMany();
   await prisma.project.deleteMany();
+  await prisma.account.deleteMany();
+}
+
+/**
+ * A real Account row for tests that only need `Project.ownerAccountId` to
+ * satisfy the FK (`onDelete: Restrict`) — not an Authorization test itself.
+ * Auth-focused tests use `apps/api`'s `FakeAuthAdapter` + Lazy Provisioning
+ * instead of creating Accounts directly (Sprint 7).
+ */
+export async function createTestAccount(prisma: PrismaClient): Promise<{ id: string }> {
+  const account = await prisma.account.create({
+    data: { authProvider: 'clerk', authSubject: `test-subject-${randomUUID()}`, emailVerified: true },
+  });
+  return { id: account.id };
 }
 
 async function* linesFrom(rawLines: string[]): AsyncGenerator<string> {
@@ -56,7 +71,11 @@ export async function createAnalysisInAnalyzingState(prisma: PrismaClient): Prom
   projectId: string;
   analysisId: string;
 }> {
-  const project = await new PrismaProjectRepository(prisma).create({ name: 'Persistence Test Project' });
+  const account = await createTestAccount(prisma);
+  const project = await new PrismaProjectRepository(prisma).create({
+    name: 'Persistence Test Project',
+    ownerAccountId: account.id,
+  });
   const analysisRepository = new PrismaAnalysisRepository(prisma);
   const created = await analysisRepository.create({ projectId: project.id });
   await analysisRepository.updateStatus(created.id, 'uploaded');

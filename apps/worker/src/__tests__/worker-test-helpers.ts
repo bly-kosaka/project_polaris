@@ -30,6 +30,11 @@ export async function resetDatabase(): Promise<void> {
   await prisma.analysis.deleteMany();
   await prisma.projectKnownInformation.deleteMany();
   await prisma.project.deleteMany();
+  await prisma.account.deleteMany();
+}
+
+export async function createTestAccount(): Promise<{ id: string }> {
+  return prisma.account.create({ data: { authProvider: 'clerk', authSubject: `test-subject-${Date.now()}-${Math.random()}`, emailVerified: true } });
 }
 
 export function readFixture(name: string): string {
@@ -103,7 +108,8 @@ export async function setUpUploadedAnalysis(
   deps: WorkerDeps,
   fixtureName: string,
 ): Promise<{ analysisId: string; storageKey: string }> {
-  const project = await new PrismaProjectRepository(deps.prisma).create({ name: `Worker Test ${Date.now()}` });
+  const account = await createTestAccount();
+  const project = await new PrismaProjectRepository(deps.prisma).create({ name: `Worker Test ${Date.now()}`, ownerAccountId: account.id });
   const analysis = await new PrismaAnalysisRepository(deps.prisma).create({ projectId: project.id });
   const storageKey = buildRawLogStorageKey(analysis.id);
   const content = readFixture(fixtureName);

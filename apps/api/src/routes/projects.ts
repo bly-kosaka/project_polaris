@@ -1,5 +1,6 @@
 import { PrismaAnalysisRepository, PrismaProjectRepository } from '@polaris/db';
 import type { FastifyInstance } from 'fastify';
+import { requireOwnedProject } from '../auth/require-owned-project.js';
 import type { ApiDeps } from '../deps.js';
 import { toAnalysisSummaryDto } from '../dto/analysis.js';
 import { toProjectDetailDto, toProjectSummaryDto } from '../dto/project.js';
@@ -26,29 +27,27 @@ export function registerProjectsRoutes(app: FastifyInstance, deps: ApiDeps): voi
       );
     }
 
-    const project = await new PrismaProjectRepository(deps.prisma).create({ name });
+    // Client never supplies its own ownerAccountId — the Account provisioned
+    // by the global authenticate hook is the sole source (50_Development_Setup_and_Seventh_Sprint.md §35).
+    const project = await new PrismaProjectRepository(deps.prisma).create({ name, ownerAccountId: req.account.id });
     return reply.code(201).send(toProjectDetailDto(project));
   });
 
-  app.get('/projects', async (_req, reply) => {
-    const list = await new PrismaProjectRepository(deps.prisma).listAllWithSummary();
+  app.get('/projects', async (req, reply) => {
+    const list = await new PrismaProjectRepository(deps.prisma).listAllWithSummaryForOwner(req.account.id);
     return reply.send(list.map(toProjectSummaryDto));
   });
 
   app.get<{ Params: { projectId: string } }>('/projects/:projectId', async (req, reply) => {
-    const project = await new PrismaProjectRepository(deps.prisma).findById(req.params.projectId);
-    if (project === null) {
-      return sendApiError(reply, 404, 'PROJECT_NOT_FOUND', 'Project not found');
-    }
+    const project = await requireOwnedProject(deps, req, reply, req.params.projectId);
+    if (project === undefined) return;
     return reply.send(toProjectDetailDto(project));
   });
 
   app.get<{ Params: { projectId: string } }>('/projects/:projectId/analyses', async (req, reply) => {
-    const project = await new PrismaProjectRepository(deps.prisma).findById(req.params.projectId);
-    if (project === null) {
-      return sendApiError(reply, 404, 'PROJECT_NOT_FOUND', 'Project not found');
-    }
-    const list = await new PrismaAnalysisRepository(deps.prisma).listSummariesByProjectId(req.params.projectId);
+    const project = await requireOwnedProject(deps, req, reply, req.params.projectId);
+    if (project === undefined) return;
+    const list = await new PrismaAnalysisRepository(deps.prisma).listSummariesByProjectId(project.id);
     return reply.send(list.map(toAnalysisSummaryDto));
   });
 }

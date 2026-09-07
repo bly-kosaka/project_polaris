@@ -3,7 +3,17 @@ import type { AnalysisListItem, CreateAnalysisPersistenceInput, UpdateAnalysisPe
 
 export interface AnalysisRepository {
   create(input: CreateAnalysisPersistenceInput): Promise<Analysis>;
+  /** Unscoped — for internal/test/Worker code with no Account context. Never call this from a Route handler. */
   findById(id: string): Promise<Analysis | null>;
+  /**
+   * Ownership-scoped equivalent (Sprint 7,
+   * 50_Development_Setup_and_Seventh_Sprint.md §13) — Analysis has no
+   * direct owner column of its own; ownership is resolved via a join
+   * through `project.ownerAccountId`, in the SQL `where` itself. Every
+   * Route handler that receives only an `analysisId` (no `projectId`) must
+   * use this, never the unscoped `findById` above.
+   */
+  findByIdForOwner(id: string, ownerAccountId: string): Promise<Analysis | null>;
   listByProjectId(projectId: string): Promise<Analysis[]>;
   /**
    * Backs `GET /projects/{id}/analyses` — one query with joined

@@ -1,36 +1,32 @@
 import {
   PrismaAnalysisRepository,
   PrismaObservationSetRepository,
-  PrismaProjectRepository,
   PrismaUploadedAccessLogRepository,
   persistUploadedAccessLog,
 } from '@polaris/db';
 import { enqueueAnalyzerJob } from '@polaris/queue';
 import { buildRawLogStorageKey } from '@polaris/storage';
 import type { FastifyInstance } from 'fastify';
+import { requireOwnedAnalysis } from '../auth/require-owned-analysis.js';
+import { requireOwnedProject } from '../auth/require-owned-project.js';
 import type { ApiDeps } from '../deps.js';
 import { toAnalysisDetailDto } from '../dto/analysis.js';
 import { sendApiError } from '../errors.js';
 
 export function registerAnalysesRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.post<{ Params: { projectId: string } }>('/projects/:projectId/analyses', async (req, reply) => {
-    const project = await new PrismaProjectRepository(deps.prisma).findById(req.params.projectId);
-    if (project === null) {
-      return sendApiError(reply, 404, 'PROJECT_NOT_FOUND', 'Project not found');
-    }
+    const project = await requireOwnedProject(deps, req, reply, req.params.projectId);
+    if (project === undefined) return;
 
-    const analysis = await new PrismaAnalysisRepository(deps.prisma).create({ projectId: req.params.projectId });
+    const analysis = await new PrismaAnalysisRepository(deps.prisma).create({ projectId: project.id });
     return reply.code(201).send({ analysisId: analysis.id, status: analysis.status });
   });
 
   app.post<{ Params: { analysisId: string } }>('/analyses/:analysisId/upload', async (req, reply) => {
     const { analysisId } = req.params;
-    const analysisRepository = new PrismaAnalysisRepository(deps.prisma);
 
-    const analysis = await analysisRepository.findById(analysisId);
-    if (analysis === null) {
-      return sendApiError(reply, 404, 'ANALYSIS_NOT_FOUND', 'Analysis not found');
-    }
+    const analysis = await requireOwnedAnalysis(deps, req, reply, analysisId);
+    if (analysis === undefined) return;
     if (analysis.status !== 'created') {
       return sendApiError(reply, 409, 'ANALYSIS_NOT_IN_CREATED_STATE', 'Analysis is not awaiting an upload');
     }
@@ -99,10 +95,8 @@ export function registerAnalysesRoutes(app: FastifyInstance, deps: ApiDeps): voi
   });
 
   app.get<{ Params: { analysisId: string } }>('/analyses/:analysisId', async (req, reply) => {
-    const analysis = await new PrismaAnalysisRepository(deps.prisma).findById(req.params.analysisId);
-    if (analysis === null) {
-      return sendApiError(reply, 404, 'ANALYSIS_NOT_FOUND', 'Analysis not found');
-    }
+    const analysis = await requireOwnedAnalysis(deps, req, reply, req.params.analysisId);
+    if (analysis === undefined) return;
     const uploadedAccessLog = await new PrismaUploadedAccessLogRepository(deps.prisma).findByAnalysisId(
       req.params.analysisId,
     );
@@ -110,10 +104,8 @@ export function registerAnalysesRoutes(app: FastifyInstance, deps: ApiDeps): voi
   });
 
   app.get<{ Params: { analysisId: string } }>('/analyses/:analysisId/observations', async (req, reply) => {
-    const analysis = await new PrismaAnalysisRepository(deps.prisma).findById(req.params.analysisId);
-    if (analysis === null) {
-      return sendApiError(reply, 404, 'ANALYSIS_NOT_FOUND', 'Analysis not found');
-    }
+    const analysis = await requireOwnedAnalysis(deps, req, reply, req.params.analysisId);
+    if (analysis === undefined) return;
     if (analysis.status === 'failed') {
       return sendApiError(reply, 409, 'ANALYSIS_FAILED', 'The Analyzer could not process this Analysis');
     }

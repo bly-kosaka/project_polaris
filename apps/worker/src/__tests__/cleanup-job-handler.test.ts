@@ -5,7 +5,7 @@ import { Readable } from 'node:stream';
 import type { Job } from 'bullmq';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { handleCleanupJob } from '../cleanup-job-handler.js';
-import { buildWorkerDeps, resetDatabase } from './worker-test-helpers.js';
+import { buildWorkerDeps, createTestAccount, resetDatabase } from './worker-test-helpers.js';
 
 const fakeCleanupJob = { data: { scheduledAt: new Date().toISOString() } } as unknown as Job<CleanupExpiredRawLogsJobData>;
 
@@ -22,7 +22,8 @@ describe('handleCleanupJob', () => {
   });
 
   async function createUpload(expiresAt: Date) {
-    const project = await new PrismaProjectRepository(deps.prisma).create({ name: `Cleanup Test ${Date.now()}` });
+    const account = await createTestAccount();
+    const project = await new PrismaProjectRepository(deps.prisma).create({ name: `Cleanup Test ${Date.now()}`, ownerAccountId: account.id });
     const analysis = await new PrismaAnalysisRepository(deps.prisma).create({ projectId: project.id });
     const storageKey = buildRawLogStorageKey(analysis.id);
     await deps.storage.putObject({ key: storageKey, body: Readable.from(['line\n']) });

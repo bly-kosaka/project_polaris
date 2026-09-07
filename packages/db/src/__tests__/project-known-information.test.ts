@@ -3,7 +3,7 @@ import { prisma } from '../client.js';
 import { PrismaProjectRepository } from '../project/prisma-project-repository.js';
 import { PrismaProjectKnownInformationRepository } from '../project-known-information/prisma-project-known-information-repository.js';
 import { toKnownInformationDataset } from '../project-known-information/known-information-mapper.js';
-import { resetDatabase } from './db-test-helpers.js';
+import { createTestAccount, resetDatabase } from './db-test-helpers.js';
 
 describe('PrismaProjectKnownInformationRepository', () => {
   beforeEach(async () => {
@@ -11,7 +11,8 @@ describe('PrismaProjectKnownInformationRepository', () => {
   });
 
   async function createProject() {
-    return new PrismaProjectRepository(prisma).create({ name: 'Known Information Test Project' });
+    const account = await createTestAccount(prisma);
+    return new PrismaProjectRepository(prisma).create({ name: 'Known Information Test Project', ownerAccountId: account.id });
   }
 
   it('creates and reads back a known-information entry', async () => {

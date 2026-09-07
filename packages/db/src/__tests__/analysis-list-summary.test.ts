@@ -4,7 +4,7 @@ import { PrismaAnalysisRepository } from '../analysis/prisma-analysis-repository
 import { PrismaProjectRepository } from '../project/prisma-project-repository.js';
 import { persistAnalyzerSuccess } from '../persist-analyzer-result.js';
 import { persistUploadedAccessLog } from '../persist-upload.js';
-import { buildValidObservationSet, resetDatabase } from './db-test-helpers.js';
+import { buildValidObservationSet, createTestAccount, resetDatabase } from './db-test-helpers.js';
 
 // A plain placeholder is fine here — persistUploadedAccessLog doesn't
 // validate storage key format, and packages/db has no reason to depend on
@@ -21,7 +21,8 @@ describe('PrismaAnalysisRepository.listSummariesByProjectId (Sprint 5)', () => {
   it('joins UploadedAccessLog/ObservationSet in one query, degrading gracefully when either is missing or invalid', async () => {
     const projectRepository = new PrismaProjectRepository(prisma);
     const analysisRepository = new PrismaAnalysisRepository(prisma);
-    const project = await projectRepository.create({ name: 'List Summary Test' });
+    const account = await createTestAccount(prisma);
+    const project = await projectRepository.create({ name: 'List Summary Test', ownerAccountId: account.id });
 
     // 1. No upload at all yet.
     const created = await analysisRepository.create({ projectId: project.id });

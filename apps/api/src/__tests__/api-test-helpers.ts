@@ -2,11 +2,13 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { S3Client } from '@aws-sdk/client-s3';
+import type { AuthAdapter } from '@polaris/auth';
 import { analyzeAccessLog } from '@polaris/analyzer';
-import { PrismaAnalysisRepository, PrismaProjectRepository, persistAnalyzerSuccess, prisma } from '@polaris/db';
+import { PrismaAccountRepository, PrismaAnalysisRepository, PrismaProjectRepository, persistAnalyzerSuccess, prisma } from '@polaris/db';
 import { createAiExplanationQueue, createAnalyzerQueue, createProducerConnection } from '@polaris/queue';
 import { ensureBucket, S3TemporaryObjectStorage } from '@polaris/storage';
 import type { ApiDeps } from '../deps.js';
+import { FakeAuthAdapter } from './fake-auth-adapter.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -20,13 +22,17 @@ export async function resetDatabase(): Promise<void> {
   await prisma.analysis.deleteMany();
   await prisma.projectKnownInformation.deleteMany();
   await prisma.project.deleteMany();
+  await prisma.account.deleteMany();
 }
 
 export function readFixture(name: string): string {
   return readFileSync(path.join(repoRoot, 'fixtures', 'access-logs', name), 'utf-8');
 }
 
-export async function buildApiDeps(maxUploadBytes = 52428800): Promise<ApiDeps & { close: () => Promise<void> }> {
+export async function buildApiDeps(
+  maxUploadBytes = 52428800,
+  options: { authAdapter?: AuthAdapter } = {},
+): Promise<ApiDeps & { close: () => Promise<void> }> {
   const s3Client = new S3Client({
     endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
     region: process.env.S3_REGION ?? 'us-east-1',
@@ -50,6 +56,7 @@ export async function buildApiDeps(maxUploadBytes = 52428800): Promise<ApiDeps &
     storage,
     analyzerQueue,
     aiExplanationQueue,
+    authAdapter: options.authAdapter ?? new FakeAuthAdapter(),
     maxUploadBytes,
     rawLogRetentionHours: 24,
     corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
@@ -74,10 +81,26 @@ async function* linesFrom(rawLines: string[]): AsyncGenerator<string> {
  * `apps/worker/src/__tests__/worker-test-helpers.ts`'s
  * `setUpAnalysisReadyForAiExplanation`.
  */
-export async function createAnalysisReadyForAiExplanation(deps: { prisma: ApiDeps['prisma'] }): Promise<{
+export async function createAnalysisReadyForAiExplanation(
+  deps: { prisma: ApiDeps['prisma'] },
+  ownerToken = 'test-account',
+): Promise<{
   analysisId: string;
 }> {
-  const project = await new PrismaProjectRepository(deps.prisma).create({ name: `AI Explanation API Test ${Date.now()}` });
+  // The owning Account is provisioned through the exact same FakeAuthAdapter
+  // identity-function convention the routes themselves use — an
+  // `Authorization: Bearer <ownerToken>` request against these fixtures
+  // resolves to the same Account row this helper just created.
+  const account = await new PrismaAccountRepository(deps.prisma).getOrCreateByAuthSubject({
+    authProvider: 'clerk',
+    authSubject: ownerToken,
+    email: `${ownerToken}@example.com`,
+    emailVerified: true,
+  });
+  const project = await new PrismaProjectRepository(deps.prisma).create({
+    name: `AI Explanation API Test ${Date.now()}`,
+    ownerAccountId: account.id,
+  });
   const analysisRepository = new PrismaAnalysisRepository(deps.prisma);
   const analysis = await analysisRepository.create({ projectId: project.id });
   await analysisRepository.updateStatus(analysis.id, 'uploaded');

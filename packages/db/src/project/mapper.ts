@@ -17,6 +17,7 @@ export function toDomainProject(record: PrismaProject): Project {
     ...(record.description !== null ? { description: record.description } : {}),
     ...(site !== undefined ? { site } : {}),
     status: fromPrismaProjectStatus(record.status),
+    ownerAccountId: record.ownerAccountId,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   };
