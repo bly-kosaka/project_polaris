@@ -1,5 +1,6 @@
 import { AuthError } from '@polaris/auth';
-import { PrismaAccountRepository } from '@polaris/db';
+import { DbError, PrismaAccountRepository } from '@polaris/db';
+import type { Account } from '@polaris/domain';
 import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from 'fastify';
 import type { ApiDeps } from '../deps.js';
 import { sendApiError } from '../errors.js';
@@ -37,13 +38,30 @@ export function createAuthenticateHook(deps: ApiDeps): preHandlerHookHandler {
 
     const accountRepository = new PrismaAccountRepository(deps.prisma);
     // Atomic Lazy Provisioning (F-01) — race-safe under concurrent
-    // first-requests from the same Auth Provider subject by construction.
-    let account = await accountRepository.getOrCreateByAuthSubject({
-      authProvider: principal.provider,
-      authSubject: principal.subject,
-      ...(principal.email !== undefined ? { email: principal.email } : {}),
-      emailVerified: principal.emailVerified,
-    });
+    // first-requests from the same Auth Provider subject by construction
+    // (a single upsert keyed on authSubject's @unique constraint). Defense
+    // in depth for the residual case where two genuinely concurrent
+    // requests still surface a unique-constraint CONFLICT from the
+    // database driver itself: the loser simply re-reads the row the winner
+    // just created, rather than ever surfacing a 500 for what is, from the
+    // client's perspective, a completely normal first request.
+    let account: Account;
+    try {
+      account = await accountRepository.getOrCreateByAuthSubject({
+        authProvider: principal.provider,
+        authSubject: principal.subject,
+        ...(principal.email !== undefined ? { email: principal.email } : {}),
+        emailVerified: principal.emailVerified,
+      });
+    } catch (error) {
+      if (error instanceof DbError && error.code === 'CONFLICT') {
+        const existing = await accountRepository.findByAuthSubject(principal.provider, principal.subject);
+        if (existing === null) throw error;
+        account = existing;
+      } else {
+        throw error;
+      }
+    }
 
     // Opportunistic profile-snapshot refresh (m-02) — never load-bearing,
     // never an unhandled rejection.

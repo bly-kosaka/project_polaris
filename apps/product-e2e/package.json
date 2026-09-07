@@ -11,6 +11,7 @@
     "@polaris/ai": "*",
     "@polaris/analyzer": "*",
     "@polaris/api": "*",
+    "@polaris/auth": "*",
     "@polaris/db": "*",
     "@polaris/queue": "*",
     "@polaris/shared": "*",

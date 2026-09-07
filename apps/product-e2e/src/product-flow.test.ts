@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
+import { ref } from 'vue';
 import { S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '@polaris/db';
 import {
@@ -26,8 +27,44 @@ import type { WorkerDeps } from '@polaris/worker/deps';
 import { collectObservationGroupIds } from '@polaris/ai';
 import type { AIProvider, AIProviderRequest, AIProviderResult } from '@polaris/ai';
 import type { ObservationSet } from '@polaris/analyzer';
+import type { AuthAdapter, AuthenticatedPrincipal } from '@polaris/auth';
 import App from '@polaris/web/src/App.vue';
 import { router } from '@polaris/web/src/router/index';
+
+/**
+ * The same FakeAuthAdapter identity-function convention `apps/api`'s own
+ * tests use (`apps/api/src/__tests__/fake-auth-adapter.ts`) — a request
+ * authenticates "as Account A" simply by sending `Bearer account-a`. Not
+ * imported directly since `apps/api` doesn't publish that test helper
+ * through its `exports` subpaths (it's test-only, deliberately not part of
+ * the package's public surface).
+ */
+class FakeAuthAdapter implements AuthAdapter {
+  async verifyToken(token: string): Promise<AuthenticatedPrincipal> {
+    return { provider: 'clerk', subject: token, email: `${token}@example.com`, emailVerified: true };
+  }
+}
+
+/**
+ * Mirrors `apps/web/src/__tests__/App.test.ts`'s mocking approach —
+ * `useAuth()`/`useUser()` are the only `@clerk/vue` composables `App.vue`/
+ * `AppShell.vue` call, and this suite never exercises real Clerk UI (Sign
+ * In/Sign Up are never visited in this flow). `mockToken` drives which
+ * FakeAuthAdapter identity — and therefore which Account — a mounted
+ * `App` authenticates as; switching it mid-suite (decision 13's Account
+ * A -> Account B flow) is the entire mechanism for "logging in as a
+ * different user" here, exactly mirroring `setTokenGetter()`'s role in
+ * `apps/web/src/api/client.ts`.
+ */
+const mockToken = ref('account-a');
+vi.mock('@clerk/vue', () => ({
+  useAuth: () => ({
+    isLoaded: ref(true),
+    isSignedIn: ref(true),
+    getToken: ref(() => Promise.resolve(mockToken.value)),
+  }),
+  useUser: () => ({ user: ref(null) }),
+}));
 
 /**
  * The one and only "Provider" ever invoked in this suite
@@ -122,6 +159,7 @@ beforeAll(async () => {
     storage,
     analyzerQueue,
     aiExplanationQueue,
+    authAdapter: new FakeAuthAdapter(),
     maxUploadBytes: 52428800,
     rawLogRetentionHours: 24,
     // Must match vitest.config.ts's `environmentOptions.happyDOM.url` — the
@@ -182,6 +220,10 @@ afterAll(async () => {
 });
 
 describe('Product flow', () => {
+  beforeEach(() => {
+    mockToken.value = 'account-a';
+  });
+
   it('walks Project Create -> Analysis Upload -> real Worker processing -> Result -> Drawer against the real stack', async () => {
     await router.push('/projects/new');
     await router.isReady();
@@ -240,6 +282,34 @@ describe('Product flow', () => {
 
     const searchInput = wrapper.find('.analysis-result-page__search');
     expect((searchInput.element as HTMLInputElement).value.length).toBeGreaterThan(0);
+
+    wrapper.unmount();
+  });
+
+  it('decision 13: Account B navigating directly to Account A\'s Project URL sees a not-found state, never the Project', async () => {
+    // Account A owns this Project — created directly via the real
+    // Repository/FakeAuthAdapter identity mapping (authSubject === the
+    // Bearer token), the same pairing `apps/api`'s own ownership tests use.
+    const { PrismaAccountRepository, PrismaProjectRepository } = await import('@polaris/db');
+    const ownerAccount = await new PrismaAccountRepository(prisma).getOrCreateByAuthSubject({
+      authProvider: 'clerk',
+      authSubject: 'account-a',
+      email: 'account-a@example.com',
+      emailVerified: true,
+    });
+    const project = await new PrismaProjectRepository(prisma).create({
+      name: 'Account A Only Project',
+      ownerAccountId: ownerAccount.id,
+    });
+
+    mockToken.value = 'account-b';
+    await router.push(`/projects/${project.id}`);
+    await router.isReady();
+    const wrapper = mount(App, { global: { plugins: [router] } });
+    await flushPromises();
+
+    await vi.waitFor(() => expect(wrapper.text()).toContain('見つかりませんでした'), { timeout: 10000 });
+    expect(wrapper.text()).not.toContain('Account A Only Project');
 
     wrapper.unmount();
   });
