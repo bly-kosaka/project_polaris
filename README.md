@@ -2,7 +2,7 @@
 
 アクセスログを、人とAIが確認できる構造化された観測情報へ変換するプロダクト。
 
-設計書は [`md/`](md/) 配下にある。実装はまず `md/26_Development_Setup_and_First_Sprint.md` の Sprint 1（リポジトリ基盤 + Analyzer Parser / Normalizer）から開始している。認証・課金はまだ実装していない。
+設計書は [`md/`](md/) 配下にある。実装はまず `md/26_Development_Setup_and_First_Sprint.md` の Sprint 1（リポジトリ基盤 + Analyzer Parser / Normalizer）から開始している。認証（Clerk）はSprint 7で実装済み。課金はまだ実装していない。
 
 ---
 
@@ -26,7 +26,9 @@ yarn install
 cp .env.example .env
 ```
 
-`DATABASE_URL` / `REDIS_URL` / `S3_*` / `APP_BASE_URL` は必須（`packages/shared` の Zod スキーマが起動時に検証し、不足時は Fail Fast する）。`MAX_UPLOAD_BYTES`（既定 50MB）/ `RAW_LOG_RETENTION_HOURS`（既定 24時間）/ `AI_MAX_OUTPUT_TOKENS`（既定 4096）/ `AI_MAX_INPUT_BYTES`（既定 200000 byte）はベンチマーク前の仮値で、いずれもConfig化されており無制限にはならない。`AI_PROVIDER`は既定`openai`（Sprint 6時点で対応するのはOpenAIのみ）。`OPENAI_MODEL`は実際にAI Explanationを動かす場合のみ必須（未設定でもCIは通る — 後述のFake AI Providerのみを使うため）。`OPENAI_API_KEY` / `OPENAI_REASONING_EFFORT` / `CLERK_*` / `STRIPE_*` は任意。
+`DATABASE_URL` / `REDIS_URL` / `S3_*` / `APP_BASE_URL` は必須（`packages/shared` の Zod スキーマが起動時に検証し、不足時は Fail Fast する）。`MAX_UPLOAD_BYTES`（既定 50MB）/ `RAW_LOG_RETENTION_HOURS`（既定 24時間）/ `AI_MAX_OUTPUT_TOKENS`（既定 4096）/ `AI_MAX_INPUT_BYTES`（既定 200000 byte）はベンチマーク前の仮値で、いずれもConfig化されており無制限にはならない。`AI_PROVIDER`は既定`openai`（Sprint 6時点で対応するのはOpenAIのみ）。`OPENAI_MODEL`は実際にAI Explanationを動かす場合のみ必須（未設定でもCIは通る — 後述のFake AI Providerのみを使うため）。`OPENAI_API_KEY` / `OPENAI_REASONING_EFFORT` / `STRIPE_*` は任意。
+
+`CLERK_SECRET_KEY` / `CLERK_PUBLISHABLE_KEY` はZodスキーマ上は任意だが、`apps/api`は起動時（`main()`実行時のみ、Type CheckやTest実行時は無関係）に`CLERK_SECRET_KEY`が未設定だと明示的にFail Fastする — 実際にAPIを起動する場合は必須。CIはFake Auth Adapterのみを使うため、この2つを設定しなくてもCIは通る。`apps/web`側は別途 `apps/web/.env` の `VITE_CLERK_PUBLISHABLE_KEY` が必要（後述）。
 
 `.env` はコミットしない。Secret Value を `.env.example` へ書かない。
 
@@ -111,14 +113,18 @@ GET  /analyses/:analysisId/explanation        AI Explanation取得（未生成/�
 POST /analyses/:analysisId/explanation/retry  AI Explanationの再試行（失敗後のみ; 既存成功結果は再生成しない）
 ```
 
+Sprint 7で全Route（上記すべて）にAuthentication + Ownershipを追加した。全Requestに`Authorization: Bearer <Clerk Session Token>`が必須（欠落/不正時は401 `AUTHENTICATION_REQUIRED` / `AUTHENTICATION_INVALID`、Clerk側の一時的な障害時は503 `AUTHENTICATION_UNAVAILABLE` — 401とは意図的に区別し、有効なSessionを持つUserを誤ってSign Inへ差し戻さないようにしている）。Email未確認時は403 `EMAIL_VERIFICATION_REQUIRED`。他Accountが所有するProject/Analysisへのアクセスは404（`PROJECT_NOT_FOUND` / `ANALYSIS_NOT_FOUND`）を返す — 403は使わない（存在の有無を推測されないため）。
+
 ### Web (Vue) をローカルで動かす
 
 API（`http://localhost:3001`）が起動している状態で、別Terminalで:
 
 ```bash
-cp apps/web/.env.example apps/web/.env   # VITE_API_BASE_URL
+cp apps/web/.env.example apps/web/.env   # VITE_API_BASE_URL / VITE_CLERK_PUBLISHABLE_KEY
 yarn workspace @polaris/web run dev      # http://localhost:5173
 ```
+
+`VITE_CLERK_PUBLISHABLE_KEY`は実際にSign In/Sign Upを動かす場合に必須（Clerk Dashboardの公開Key）。未設定でもUnit Test/Buildは通る（`main.ts`のみが参照するため）。
 
 ## Test
 
@@ -148,16 +154,18 @@ yarn build
 ```text
 polaris/
 ├─ apps/
-│  ├─ web/           Vue 3 + Vite Frontend（Project / Analysis / Result画面）
-│  ├─ api/           Fastify HTTP API（Project / Analysis CRUD, Upload / Status / Observations Endpoint）
+│  ├─ web/           Vue 3 + Vite Frontend（Project / Analysis / Result画面, Sign In/Sign Up/Account Settings）
+│  ├─ api/           Fastify HTTP API（Project / Analysis CRUD, Upload / Status / Observations Endpoint,
+│  │                  Authentication/Ownership Hook）
 │  ├─ worker/        BullMQ Worker（Analyzer Job / Raw Log Delete Retry / Cleanup）
 │  └─ product-e2e/   apps/web・api・workerを実Infra上で結合するProduct Integration Test
 │
 ├─ packages/
-│  ├─ domain/    Framework非依存のDomain型（Project / Analysis / UploadedAccessLog / AnalysisExecution 等）
+│  ├─ domain/    Framework非依存のDomain型（Project / Analysis / Account / UploadedAccessLog / AnalysisExecution 等）
 │  ├─ analyzer/  Analyzer Core（Parser / Normalizer / Aggregation / Known Information / ObservationSet）
 │  ├─ ai/        AI Explanation連携（Prompt Builder / OpenAI Responses API Adapter / Schema・Grounding Validation）
-│  ├─ db/        Prisma Client / Repository（Project / Analysis / ObservationSetRecord /
+│  ├─ auth/      Authentication境界（Provider非依存のAuthAdapter Interface, ClerkAuthAdapter）
+│  ├─ db/        Prisma Client / Repository（Project / Analysis / Account / ObservationSetRecord /
 │  │              ProjectKnownInformation / UploadedAccessLog / AnalysisExecution）
 │  ├─ queue/     BullMQ Queue境界（Queue名 / Job Payload型 / Connection Factory / enqueue）
 │  ├─ storage/   Temporary Object Storage境界（S3/MinIO Adapter, Storage Key生成）
@@ -208,3 +216,15 @@ polaris/
 最重要不変条件（`md/44_Development_Setup_and_Sixth_Sprint.md`）：AIの失敗はAnalyzerの失敗として見せない（`Analysis.status`は常に`completed`のまま、`aiStatus`だけが`failed`になる）。AI出力はAnalyzerの観測事実と視覚的に区別する（Fact/Interpretationのセクション分離、常に「AIによる」ラベル付き）。Risk/Severity/Priority/Finding単位のUrgencyは存在しない — `overallUrgency`は「どの程度早く確認すべきか」のみを表す。Raw Access LogはAIへ一切送信しない（送信対象はObservationSetのみ）。CIは実OpenAI呼び出しを一切行わず、Worker/API/Product Integration Testの全てでFake AI Providerのみを使う。
 
 含まない（意図的にスコープ外）：AI Provider選択UI（`AI_PROVIDER`は`openai`固定）、Billing/Entitlementによる機能制限、Chat形式のAI対話（`PromptPurpose`は`'initial_summary'`のみ）、Production Deploy。
+
+### Sprint 7 のスコープ
+
+`md/50_Development_Setup_and_Seventh_Sprint.md` に対応する。
+
+含む：`packages/auth`（Provider非依存の`AuthAdapter` Interface、`ClerkAuthAdapter` — Session-bound Tokenの検証、Auth Provider障害とToken不正の分離、`@clerk/backend`の`users.getUser()`フォールバックによるEmail/Email確認状態の取得）、`Account`モデルとLazy Provisioning（初回Requestで`Account`を自動作成、`authSubject`の`@unique`制約による原子的Upsertで並行Requestでも安全）、`Project.ownerAccountId`によるOwnership、全Repository QueryへのOwnership Scope追加（SQLの`WHERE`句自体でFilterし、「取得してから比較」は行わない）、`apps/api`へのGlobal Authentication/Email Verification Hookと各RouteのOwnership Check、`apps/web`のClerk統合（Sign In/Sign Up/Account Settings画面、初回Navigationの認証状態未確定Raceに対処するApp.vueのGate、`apiFetch`へのAuthorization Header自動付与）、`apps/product-e2e`へのAccount分離検証（別Accountからの直接URLアクセスは404）。
+
+最重要不変条件：非所有のProject/Analysisへのアクセスは常に404（`PROJECT_FORBIDDEN`のような403系Codeは存在しない — 存在の有無を推測されないため）。Ownershipの判定は必ずBackend側で行い、Frontendの表示制御を信頼しない。Auth Provider（Clerk）の一時的な障害はToken不正と区別し503を返す（有効なSessionを持つUserを誤ってSign Inへ差し戻さない）。ClientはOwnerを自称できない（`ownerAccountId`は常にAuthenticate済みのAccountから決定）。`apps/worker` / `packages/analyzer` / `packages/ai` はAccount非依存のまま — QueueのJob Payloadには`analysisId`のみが載り、Tokenは一切運ばれない。
+
+運用上の注意：Clerk Dashboardでカスタム Session Token Templateを設定していない場合、`ClerkAuthAdapter`は毎Requestごとに`users.getUser()`を1回追加で呼ぶ（Email/Email確認状態がSession Claimに含まれないため）。これはMVPとして許容している設計上のTrade-off（Latency増加、Clerk Backend APIのRate Limit・可用性への結合）であり、将来的にはCustom Session Claimまたは短命Cacheでの改善余地がある。
+
+含まない（意図的にスコープ外）：Billing/Entitlement（別Sprint）、Webhook同期（`Account`のProfile更新は各Requestでの Best-effort Refreshのみ）、Organization/Team機能、Social Login個別設定、Production Deploy。
