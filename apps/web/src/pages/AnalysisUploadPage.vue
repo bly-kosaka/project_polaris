@@ -8,6 +8,15 @@ import { createAnalysis, uploadAccessLog } from '../api/analyses';
 const props = defineProps<{ projectId: string }>();
 const router = useRouter();
 
+/**
+ * UX-only pre-check — the API's own `maxUploadBytes` limit is the
+ * authoritative one and is enforced regardless of this value
+ * (42_Sprint_5_Review.md m-01). Falls back to the backend's own default
+ * (50MB) if the env var isn't set, so the check still does something
+ * useful without requiring every environment to define it.
+ */
+const MAX_UPLOAD_BYTES = Number(import.meta.env.VITE_MAX_UPLOAD_BYTES ?? 52428800);
+
 const selectedFile = ref<File | null>(null);
 const validationMessage = ref<string | null>(null);
 const uploadError = ref<unknown>(null);
@@ -20,9 +29,20 @@ const isSubmitting = ref(false);
  */
 const pendingAnalysisId = ref<string | null>(null);
 
+function formatMegabytes(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))}MB`;
+}
+
 function onFileChange(event: Event): void {
   const input = event.target as HTMLInputElement;
-  selectedFile.value = input.files?.[0] ?? null;
+  const file = input.files?.[0] ?? null;
+  if (file !== null && file.size > MAX_UPLOAD_BYTES) {
+    selectedFile.value = null;
+    validationMessage.value = `ファイルサイズが上限（${formatMegabytes(MAX_UPLOAD_BYTES)}）を超えています。`;
+    input.value = '';
+    return;
+  }
+  selectedFile.value = file;
   validationMessage.value = null;
 }
 

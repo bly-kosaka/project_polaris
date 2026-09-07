@@ -2,8 +2,13 @@ import { describe, expect, it, vi, afterEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import AnalysisResultPage from '../../pages/AnalysisResultPage.vue';
 import * as analysesApi from '../../api/analyses';
+import * as projectsApi from '../../api/projects';
 import { ApiError } from '../../api/client';
 import type { ObservationSetDto } from '../../api/schemas';
+
+function mockProject(): ReturnType<typeof projectsApi.getProject> {
+  return Promise.resolve({ id: 'p1', name: 'My Project', status: 'active', createdAt: 'x', updatedAt: 'x' });
+}
 
 const emptyView = { totalGroups: 0, selectedGroups: 0, omittedGroups: 0 };
 
@@ -152,6 +157,7 @@ describe('AnalysisResultPage', () => {
       updatedAt: 'x',
       originalFileName: 'access.log',
     });
+    vi.spyOn(projectsApi, 'getProject').mockImplementation(mockProject);
     vi.spyOn(analysesApi, 'getObservationSet').mockResolvedValue(baseObservationSet());
 
     const wrapper = mount(AnalysisResultPage, { props: { analysisId: 'a1' } });
@@ -169,6 +175,7 @@ describe('AnalysisResultPage', () => {
       createdAt: 'x',
       updatedAt: 'x',
     });
+    vi.spyOn(projectsApi, 'getProject').mockImplementation(mockProject);
     vi.spyOn(analysesApi, 'getObservationSet').mockResolvedValue(baseObservationSet());
 
     const wrapper = mount(AnalysisResultPage, { props: { analysisId: 'a1' } });
@@ -192,6 +199,7 @@ describe('AnalysisResultPage', () => {
       createdAt: 'x',
       updatedAt: 'x',
     });
+    vi.spyOn(projectsApi, 'getProject').mockImplementation(mockProject);
     vi.spyOn(analysesApi, 'getObservationSet').mockResolvedValue(baseObservationSet());
 
     const wrapper = mount(AnalysisResultPage, { props: { analysisId: 'a1' } });
@@ -211,6 +219,7 @@ describe('AnalysisResultPage', () => {
       createdAt: 'x',
       updatedAt: 'x',
     });
+    vi.spyOn(projectsApi, 'getProject').mockImplementation(mockProject);
     vi.spyOn(analysesApi, 'getObservationSet').mockRejectedValue(
       new ApiError(409, 'ANALYSIS_FAILED', 'analysis failed'),
     );
@@ -220,5 +229,83 @@ describe('AnalysisResultPage', () => {
 
     expect(wrapper.text()).toContain('失敗');
     expect(wrapper.text()).not.toMatch(/問題(は)?ありません|安全です/);
+  });
+
+  it('shows the Result Overview with Project name, request count, period, and Analyzer status (M-02)', async () => {
+    vi.spyOn(analysesApi, 'getAnalysis').mockResolvedValue({
+      id: 'a1',
+      projectId: 'p1',
+      status: 'analyzer_result_ready',
+      analyzerStatus: 'success',
+      createdAt: '2026-01-02T00:00:00Z',
+      updatedAt: 'x',
+    });
+    vi.spyOn(projectsApi, 'getProject').mockImplementation(mockProject);
+    vi.spyOn(analysesApi, 'getObservationSet').mockResolvedValue(baseObservationSet());
+
+    const wrapper = mount(AnalysisResultPage, { props: { analysisId: 'a1' } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('My Project');
+    expect(wrapper.text()).toContain('2026-01-02T00:00:00Z');
+    expect(wrapper.text()).toContain('2026-01-01T00:00:00Z 〜 2026-01-01T01:00:00Z');
+    expect(wrapper.text()).toContain('解析完了');
+  });
+
+  it('keeps the search filter across a Cross Aggregation Navigation (both directions), clearing it only on a manual Tab click (M-03)', async () => {
+    vi.spyOn(analysesApi, 'getAnalysis').mockResolvedValue({
+      id: 'a1',
+      projectId: 'p1',
+      status: 'analyzer_result_ready',
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    vi.spyOn(projectsApi, 'getProject').mockImplementation(mockProject);
+    vi.spyOn(analysesApi, 'getObservationSet').mockResolvedValue(baseObservationSet());
+
+    const wrapper = mount(AnalysisResultPage, { props: { analysisId: 'a1' } });
+    await flushPromises();
+
+    // Path (default tab) row -> Drawer -> "関連するSource IP" -> Source IP
+    // tab, search prefilled with the target Source IP and not reset.
+    const pathRow = wrapper.findAll('.data-table__row').find((r) => r.text().includes('/api/users'));
+    await pathRow?.trigger('click');
+    await flushPromises();
+
+    const sourceIpChip = wrapper.findAll('.analysis-result-page__chip').find((c) => c.text() === '203.0.113.1');
+    expect(sourceIpChip).toBeTruthy();
+    await sourceIpChip?.trigger('click');
+    await flushPromises();
+
+    let searchInput = wrapper.find('.analysis-result-page__search');
+    expect((searchInput.element as HTMLInputElement).value).toBe('203.0.113.1');
+    expect(wrapper.text()).toContain('203.0.113.1');
+
+    // Source IP row -> Drawer -> "関連するPath" -> Path tab, search
+    // prefilled with the target Path.
+    const sourceIpRow = wrapper.findAll('.data-table__row').find((r) => r.text().includes('203.0.113.1'));
+    await sourceIpRow?.trigger('click');
+    await flushPromises();
+
+    const pathChip = wrapper.findAll('.analysis-result-page__chip').find((c) => c.text() === '/api/users');
+    expect(pathChip).toBeTruthy();
+    await pathChip?.trigger('click');
+    await flushPromises();
+
+    searchInput = wrapper.find('.analysis-result-page__search');
+    expect((searchInput.element as HTMLInputElement).value).toBe('/api/users');
+    expect(wrapper.text()).toContain('/api/users');
+
+    // A manual Tab click, by contrast, does clear the search.
+    searchInput.setValue('something');
+    await flushPromises();
+    const statusTab = wrapper.findAll('[role="tab"]').find((t) => t.text() === 'Status');
+    await statusTab?.trigger('click');
+    await flushPromises();
+    const pathTab = wrapper.findAll('[role="tab"]').find((t) => t.text() === 'Path');
+    await pathTab?.trigger('click');
+    await flushPromises();
+    searchInput = wrapper.find('.analysis-result-page__search');
+    expect((searchInput.element as HTMLInputElement).value).toBe('');
   });
 });

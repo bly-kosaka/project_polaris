@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import PageHeader from '../components/PageHeader.vue';
 import LoadingState from '../components/LoadingState.vue';
 import ErrorState from '../components/ErrorState.vue';
@@ -18,8 +18,9 @@ import UserAgentTable from '../components/aggregation/UserAgentTable.vue';
 import TimeTable from '../components/aggregation/TimeTable.vue';
 import { useObservationSet } from '../composables/useObservationSet';
 import { getAnalysis } from '../api/analyses';
-import { analysisStatusLabel } from '../utils/statusLabels';
-import type { AnalysisDetailDto } from '../types/dto';
+import { getProject } from '../api/projects';
+import { analysisStatusLabel, analyzerStatusLabel } from '../utils/statusLabels';
+import type { AnalysisDetailDto, ProjectDetailDto } from '../types/dto';
 import type {
   PathAggregationDto,
   SourceIpAggregationDto,
@@ -35,12 +36,20 @@ const props = defineProps<{ analysisId: string }>();
 
 const analysis = ref<AnalysisDetailDto | null>(null);
 const analysisError = ref<unknown>(null);
+const project = ref<ProjectDetailDto | null>(null);
 
 async function loadAnalysis(): Promise<void> {
   try {
     analysis.value = await getAnalysis(props.analysisId);
   } catch (err) {
     analysisError.value = err;
+    return;
+  }
+  try {
+    project.value = await getProject(analysis.value.projectId);
+  } catch {
+    // Project name is a nice-to-have on this screen — a failure fetching it
+    // must not block the rest of the Result page from rendering.
   }
 }
 
@@ -62,9 +71,18 @@ const TABS: TabNavItem[] = [
 const activeTab = ref<string>('path' satisfies TabKey);
 const searchQuery = ref('');
 
-watch(activeTab, () => {
+/**
+ * Clears the search only on a manual Tab click — not on every activeTab
+ * change. A plain `watch(activeTab, ...)` used to do this and broke Cross
+ * Aggregation Navigation (goToPath/goToSourceIp below): since Vue's watch
+ * callback runs on the next flush, it fired *after* those functions had
+ * already set both activeTab and searchQuery, wiping the search value they
+ * had just set (42_Sprint_5_Review.md M-03).
+ */
+function onManualTabChange(tab: string): void {
+  activeTab.value = tab;
   searchQuery.value = '';
-});
+}
 
 function matches(value: string): boolean {
   const q = searchQuery.value.trim().toLowerCase();
@@ -151,6 +169,26 @@ function baseItems(groupId: string, requestCount: number, firstSeen: string | nu
   ];
 }
 
+/**
+ * Result Header Overview (42_Sprint_5_Review.md M-02) — Project Name,
+ * Analysis作成日時, 解析期間, リクエスト数, Analyzer状態. Depends on both
+ * `analysis` (createdAt/analyzerStatus) and `observationSet.overview`
+ * (totalRequests/firstSeen/lastSeen), so it only renders once both have
+ * loaded (see the template's `v-else-if="observationSet"` gate).
+ */
+const overviewItems = computed<KeyValueItem[]>(() => {
+  if (!analysis.value) return [];
+  const overview = observationSet.value?.overview;
+  const period = overview ? `${overview.firstSeen ?? '—'} 〜 ${overview.lastSeen ?? '—'}` : '—';
+  return [
+    { key: 'projectName', label: 'Project名', value: project.value?.name ?? '—' },
+    { key: 'createdAt', label: 'Analysis作成日時', value: analysis.value.createdAt },
+    { key: 'period', label: '解析期間', value: period },
+    { key: 'totalRequests', label: 'リクエスト数', value: overview?.totalRequests ?? '—' },
+    { key: 'analyzerStatus', label: 'Analyzer状態', value: analysis.value.analyzerStatus ?? '—' },
+  ];
+});
+
 const drawerTitle = computed(() => {
   if (pathRow.value) return pathRow.value.value.path;
   if (sourceIpRow.value) return sourceIpRow.value.value.sourceIp;
@@ -174,6 +212,13 @@ const drawerTitle = computed(() => {
     <LoadingState v-if="isLoading" message="解析結果を読み込んでいます…" />
     <ErrorState v-else-if="observationError" :error="observationError" />
     <template v-else-if="observationSet">
+      <KeyValueList :items="overviewItems" class="analysis-result-page__overview">
+        <template #value-analyzerStatus>
+          <StatusBadge v-if="analysis?.analyzerStatus" v-bind="analyzerStatusLabel(analysis.analyzerStatus)" />
+          <span v-else>—</span>
+        </template>
+      </KeyValueList>
+
       <DataLimitationPanel
         :parse-summary="observationSet.parseSummary"
         :truncation="observationSet.truncation"
@@ -181,7 +226,7 @@ const drawerTitle = computed(() => {
         :exclusion="observationSet.exclusion"
       />
 
-      <TabNav v-model="activeTab" :tabs="TABS" class="analysis-result-page__tabs" />
+      <TabNav :model-value="activeTab" :tabs="TABS" class="analysis-result-page__tabs" @update:model-value="onManualTabChange" />
 
       <input
         v-if="activeTab !== 'time'"
@@ -392,6 +437,12 @@ const drawerTitle = computed(() => {
 </template>
 
 <style scoped>
+.analysis-result-page__overview {
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
 .analysis-result-page__tabs {
   margin-bottom: var(--space-4);
 }
