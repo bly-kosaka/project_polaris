@@ -1,12 +1,18 @@
 <script setup lang="ts">
+import { useUser } from '@clerk/vue';
 // Fixed Header, Left Navigation, Main Content, optional Right Drawer slot
 // (39_Development_Setup_and_Fifth_Sprint.md §54).
+
+const { user } = useUser();
 </script>
 
 <template>
   <div class="app-shell">
     <header class="app-shell__header">
       <RouterLink to="/projects" class="app-shell__brand">Project Polaris</RouterLink>
+      <RouterLink to="/account" class="app-shell__account">
+        {{ user?.primaryEmailAddress?.emailAddress ?? 'アカウント' }}
+      </RouterLink>
     </header>
     <div class="app-shell__body">
       <nav class="app-shell__nav" aria-label="メインナビゲーション">
@@ -30,12 +36,24 @@
   height: 56px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 var(--space-5);
   background: var(--color-base);
   border-bottom: 1px solid var(--color-border);
   position: sticky;
   top: 0;
   z-index: 10;
+}
+
+.app-shell__account {
+  color: var(--color-text-inverse);
+  opacity: 0.85;
+  font-size: var(--font-size-sm);
+  text-decoration: none;
+}
+
+.app-shell__account:hover {
+  opacity: 1;
 }
 
 .app-shell__brand {

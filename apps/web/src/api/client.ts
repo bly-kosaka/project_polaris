@@ -25,6 +25,19 @@ export interface ApiFetchOptions {
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+/**
+ * A settable module-level getter rather than a Clerk import inside
+ * `apiFetch` itself — keeps this file a plain, Clerk-agnostic, directly
+ * testable function, and lets `apps/product-e2e` switch between Account A
+ * and Account B by swapping this one function
+ * (50_Development_Setup_and_Seventh_Sprint.md decision 11).
+ */
+let tokenGetter: (() => Promise<string | null>) | undefined;
+
+export function setTokenGetter(fn: typeof tokenGetter): void {
+  tokenGetter = fn;
+}
+
 function isApiErrorBody(value: unknown): value is { error: { code: string; message: string } } {
   return (
     typeof value === 'object' &&
@@ -38,12 +51,23 @@ function isApiErrorBody(value: unknown): value is { error: { code: string; messa
 }
 
 export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): Promise<T> {
+  // Merged in without clobbering any caller-supplied headers (e.g. the
+  // FormData upload's deliberate absence of a content-type header) — never
+  // set at all when there's no token getter installed yet or it returns
+  // null (F-07: a request fired before Clerk finishes loading must never
+  // silently look authenticated with a stale/missing token).
+  const token = tokenGetter ? await tokenGetter() : null;
+  const headers: Record<string, string> = { ...options.headers };
+  if (token !== null) {
+    headers.authorization = `Bearer ${token}`;
+  }
+
   let response: Response;
   try {
     response = await fetch(`${BASE_URL}${path}`, {
       method: options.method ?? 'GET',
       ...(options.body !== undefined ? { body: options.body } : {}),
-      ...(options.headers !== undefined ? { headers: options.headers } : {}),
+      headers,
       ...(options.signal !== undefined ? { signal: options.signal } : {}),
     });
   } catch {

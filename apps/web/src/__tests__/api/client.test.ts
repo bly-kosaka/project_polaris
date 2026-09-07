@@ -1,9 +1,10 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { apiFetch, ApiError } from '../../api/client';
+import { apiFetch, ApiError, setTokenGetter } from '../../api/client';
 
 describe('apiFetch', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    setTokenGetter(undefined);
   });
 
   it('returns parsed JSON on a successful response', async () => {
@@ -48,5 +49,54 @@ describe('apiFetch', () => {
     const error = await apiFetch('/anything').catch((e) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe('UNEXPECTED_RESPONSE');
+  });
+
+  it('injects an Authorization header from the installed token getter (F-07/decision 11)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    setTokenGetter(() => Promise.resolve('a-real-token'));
+
+    await apiFetch('/projects');
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).authorization).toBe('Bearer a-real-token');
+  });
+
+  it('sends no Authorization header when no token getter is installed yet', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiFetch('/projects');
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).authorization).toBeUndefined();
+  });
+
+  it('sends no Authorization header when the token getter resolves null', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    setTokenGetter(() => Promise.resolve(null));
+
+    await apiFetch('/projects');
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).authorization).toBeUndefined();
+  });
+
+  it('a 503 AUTHENTICATION_UNAVAILABLE surfaces as a normal ApiError — apiFetch itself never signs the user out (F-02)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { code: 'AUTHENTICATION_UNAVAILABLE', message: 'Auth Provider unavailable' } }),
+          { status: 503 },
+        ),
+      ),
+    );
+
+    const error = await apiFetch('/projects').catch((e) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe('AUTHENTICATION_UNAVAILABLE');
+    expect((error as ApiError).status).toBe(503);
   });
 });
