@@ -3,6 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils';
 import AnalysisResultPage from '../../pages/AnalysisResultPage.vue';
 import * as analysesApi from '../../api/analyses';
 import * as projectsApi from '../../api/projects';
+import * as aiExplanationApi from '../../api/ai-explanation';
 import { ApiError } from '../../api/client';
 import type { ObservationSetDto } from '../../api/schemas';
 
@@ -153,6 +154,7 @@ describe('AnalysisResultPage', () => {
       id: 'a1',
       projectId: 'p1',
       status: 'analyzer_result_ready',
+      aiStatus: 'not_requested',
       createdAt: 'x',
       updatedAt: 'x',
       originalFileName: 'access.log',
@@ -165,6 +167,7 @@ describe('AnalysisResultPage', () => {
 
     expect(wrapper.text()).toContain('データの制限事項');
     expect(wrapper.text()).toContain('10行中8行');
+    wrapper.unmount();
   });
 
   it('renders the Path tab by default and switches to the Source IP tab on tab click', async () => {
@@ -172,6 +175,7 @@ describe('AnalysisResultPage', () => {
       id: 'a1',
       projectId: 'p1',
       status: 'analyzer_result_ready',
+      aiStatus: 'not_requested',
       createdAt: 'x',
       updatedAt: 'x',
     });
@@ -189,6 +193,7 @@ describe('AnalysisResultPage', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('203.0.113.1');
+    wrapper.unmount();
   });
 
   it('renders Known Information as a non-danger badge', async () => {
@@ -196,6 +201,7 @@ describe('AnalysisResultPage', () => {
       id: 'a1',
       projectId: 'p1',
       status: 'analyzer_result_ready',
+      aiStatus: 'not_requested',
       createdAt: 'x',
       updatedAt: 'x',
     });
@@ -209,6 +215,7 @@ describe('AnalysisResultPage', () => {
     expect(badge.exists()).toBe(true);
     expect(badge.text()).toBe('Health Check Endpoint');
     expect(badge.classes().join(' ')).not.toMatch(/danger/);
+    wrapper.unmount();
   });
 
   it('shows a failure message, never "no problem" copy, when the Analyzer failed', async () => {
@@ -216,6 +223,7 @@ describe('AnalysisResultPage', () => {
       id: 'a1',
       projectId: 'p1',
       status: 'failed',
+      aiStatus: 'not_requested',
       createdAt: 'x',
       updatedAt: 'x',
     });
@@ -229,6 +237,7 @@ describe('AnalysisResultPage', () => {
 
     expect(wrapper.text()).toContain('失敗');
     expect(wrapper.text()).not.toMatch(/問題(は)?ありません|安全です/);
+    wrapper.unmount();
   });
 
   it('shows the Result Overview with Project name, request count, period, and Analyzer status (M-02)', async () => {
@@ -237,6 +246,7 @@ describe('AnalysisResultPage', () => {
       projectId: 'p1',
       status: 'analyzer_result_ready',
       analyzerStatus: 'success',
+      aiStatus: 'not_requested',
       createdAt: '2026-01-02T00:00:00Z',
       updatedAt: 'x',
     });
@@ -250,6 +260,7 @@ describe('AnalysisResultPage', () => {
     expect(wrapper.text()).toContain('2026-01-02T00:00:00Z');
     expect(wrapper.text()).toContain('2026-01-01T00:00:00Z 〜 2026-01-01T01:00:00Z');
     expect(wrapper.text()).toContain('解析完了');
+    wrapper.unmount();
   });
 
   it('keeps the search filter across a Cross Aggregation Navigation (both directions), clearing it only on a manual Tab click (M-03)', async () => {
@@ -257,6 +268,7 @@ describe('AnalysisResultPage', () => {
       id: 'a1',
       projectId: 'p1',
       status: 'analyzer_result_ready',
+      aiStatus: 'not_requested',
       createdAt: 'x',
       updatedAt: 'x',
     });
@@ -307,5 +319,84 @@ describe('AnalysisResultPage', () => {
     await flushPromises();
     searchInput = wrapper.find('.analysis-result-page__search');
     expect((searchInput.element as HTMLInputElement).value).toBe('');
+    wrapper.unmount();
+  });
+
+  it('shows the AI queued state without hiding the still-usable Aggregation UI (md/44 §67)', async () => {
+    vi.spyOn(analysesApi, 'getAnalysis').mockResolvedValue({
+      id: 'a1',
+      projectId: 'p1',
+      status: 'analyzer_result_ready',
+      aiStatus: 'queued',
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    vi.spyOn(projectsApi, 'getProject').mockImplementation(mockProject);
+    vi.spyOn(analysesApi, 'getObservationSet').mockResolvedValue(baseObservationSet());
+    const getAiExplanation = vi.spyOn(aiExplanationApi, 'getAiExplanation');
+
+    const wrapper = mount(AnalysisResultPage, { props: { analysisId: 'a1' } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('AIによる説明を生成しています');
+    // Aggregation stays fully usable while AI is still generating.
+    expect(wrapper.text()).toContain('/api/users');
+    expect(getAiExplanation).not.toHaveBeenCalled();
+
+    wrapper.unmount();
+  });
+
+  it('an AI Finding evidence link switches to the referenced Aggregation tab and prefills the search (md/44 §72-73)', async () => {
+    vi.spyOn(analysesApi, 'getAnalysis').mockResolvedValue({
+      id: 'a1',
+      projectId: 'p1',
+      status: 'completed',
+      aiStatus: 'success',
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    vi.spyOn(projectsApi, 'getProject').mockImplementation(mockProject);
+    // Reference Resolver reads the dimension prefix off groupId
+    // (packages/analyzer/src/observation-set/group-id.ts), so the fixture's
+    // Source IP row needs a real-shaped groupId here, not the plain
+    // placeholder ('ip-1') baseObservationSet() otherwise uses.
+    const observationSetWithPrefixedGroupId = baseObservationSet();
+    observationSetWithPrefixedGroupId.aggregations.sourceIps[0]!.groupId = 'source-ip:ip-1';
+    vi.spyOn(analysesApi, 'getObservationSet').mockResolvedValue(observationSetWithPrefixedGroupId);
+    vi.spyOn(aiExplanationApi, 'getAiExplanation').mockResolvedValue({
+      summary: 'AIによる要約テキスト',
+      overallUrgency: { level: 'normal', reason: '通常の確認で問題ありません的な言い回しは使わない', references: [], limitations: [] },
+      findings: [
+        {
+          id: 'finding-1',
+          title: 'Source IPからの集中アクセス',
+          observation: '観測されたIPからのアクセスです。',
+          nextChecks: ['アクセス元を確認する'],
+          references: [{ groupId: 'source-ip:ip-1' }],
+        },
+      ],
+      overallNotes: [],
+      dataLimitations: [],
+      provider: 'openai',
+      model: 'fake-model',
+      promptVersion: 'initial-explanation-v1',
+      createdAt: 'x',
+    });
+
+    const wrapper = mount(AnalysisResultPage, { props: { analysisId: 'a1' } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('Source IPからの集中アクセス');
+
+    const referenceButton = wrapper.find('.finding-card__reference');
+    expect(referenceButton.exists()).toBe(true);
+    await referenceButton.trigger('click');
+    await flushPromises();
+
+    const searchInput = wrapper.find('.analysis-result-page__search');
+    expect((searchInput.element as HTMLInputElement).value).toBe('203.0.113.1');
+    expect(wrapper.text()).toContain('203.0.113.1');
+
+    wrapper.unmount();
   });
 });

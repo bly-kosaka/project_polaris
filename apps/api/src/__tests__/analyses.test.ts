@@ -215,7 +215,12 @@ describe('analyses routes', () => {
     const response = await app.inject({ method: 'GET', url: `/analyses/${analysisId}` });
     expect(response.statusCode).toBe(200);
     const dto = response.json();
-    expect(dto).toMatchObject({ id: analysisId, status: 'uploaded', originalFileName: 'valid.log' });
+    expect(dto).toMatchObject({
+      id: analysisId,
+      status: 'uploaded',
+      aiStatus: 'not_requested',
+      originalFileName: 'valid.log',
+    });
     expect(typeof dto.fileSizeBytes).toBe('number');
     expect(dto).not.toHaveProperty('storageKey');
     expect(dto).not.toHaveProperty('metadata');

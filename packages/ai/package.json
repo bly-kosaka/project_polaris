@@ -6,6 +6,12 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc -b tsconfig.json"
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run packages/ai/src/__tests__"
+  },
+  "dependencies": {
+    "@polaris/analyzer": "*",
+    "openai": "6.49.0",
+    "zod": "3.25.76"
   }
 }

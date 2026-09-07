@@ -1,21 +1,26 @@
 import { S3Client } from '@aws-sdk/client-s3';
+import { selectProvider } from '@polaris/ai';
 import { prisma } from '@polaris/db';
 import {
+  AI_EXPLANATION_QUEUE,
   ANALYZER_QUEUE,
+  createAiExplanationQueue,
   createMaintenanceQueue,
   createWorkerConnection,
   MAINTENANCE_QUEUE,
   RAW_LOG_DELETE_JOB,
   registerCleanupScheduler,
 } from '@polaris/queue';
-import type { AnalyzerJobData, CleanupExpiredRawLogsJobData, RawLogDeleteJobData } from '@polaris/queue';
+import type { AIExplanationJobData, AnalyzerJobData, CleanupExpiredRawLogsJobData, RawLogDeleteJobData } from '@polaris/queue';
 import { loadEnv } from '@polaris/shared';
 import { ensureBucket, S3TemporaryObjectStorage } from '@polaris/storage';
 import { Worker } from 'bullmq';
+import { handleAiExplanationJob } from './ai-explanation-job-handler.js';
 import { handleAnalyzerJob } from './analyzer-job-handler.js';
 import { handleCleanupJob } from './cleanup-job-handler.js';
 import type { WorkerDeps } from './deps.js';
 import { handleRawLogDeleteJob } from './raw-log-delete-job-handler.js';
+import { resolveAiModelConfig } from './resolve-ai-model-config.js';
 
 async function main(): Promise<void> {
   const env = loadEnv();
@@ -31,10 +36,21 @@ async function main(): Promise<void> {
 
   const connection = createWorkerConnection(env.REDIS_URL);
 
+  // Resolved once, at bootstrap — the Job Handler/Adapter never read
+  // process.env or the Provider Registry themselves
+  // (46_Sprint_6_Plan_Final_Review.md F-04/F-06).
+  const aiModelConfig = resolveAiModelConfig(env);
+  const aiProvider = selectProvider(aiModelConfig.provider, {
+    ...(env.OPENAI_API_KEY !== undefined ? { apiKey: env.OPENAI_API_KEY } : {}),
+  });
+
   const deps: WorkerDeps = {
     prisma,
     storage,
     maintenanceQueue: createMaintenanceQueue(connection),
+    aiExplanationQueue: createAiExplanationQueue(connection),
+    aiModelConfig,
+    aiProvider,
   };
 
   // Concurrency: 1 for correctness-first (34_Development_Setup_and_Fourth_Sprint.md §70).
@@ -42,6 +58,14 @@ async function main(): Promise<void> {
     ANALYZER_QUEUE,
     async (job) => handleAnalyzerJob(job, deps),
     { connection, concurrency: 1 },
+  );
+
+  // Separate, low concurrency — an external Provider Rate Limit applies
+  // here, unlike the Analyzer Queue (44_Development_Setup_and_Sixth_Sprint.md §88).
+  const aiExplanationWorker = new Worker<AIExplanationJobData>(
+    AI_EXPLANATION_QUEUE,
+    async (job) => handleAiExplanationJob(job, deps),
+    { connection, concurrency: env.AI_WORKER_CONCURRENCY },
   );
 
   const maintenanceWorker = new Worker<RawLogDeleteJobData | CleanupExpiredRawLogsJobData>(
@@ -65,8 +89,8 @@ async function main(): Promise<void> {
   async function shutdown(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
-    await Promise.all([analyzerWorker.close(), maintenanceWorker.close()]);
-    await deps.maintenanceQueue.close();
+    await Promise.all([analyzerWorker.close(), aiExplanationWorker.close(), maintenanceWorker.close()]);
+    await Promise.all([deps.maintenanceQueue.close(), deps.aiExplanationQueue.close()]);
     connection.disconnect();
     await prisma.$disconnect();
   }

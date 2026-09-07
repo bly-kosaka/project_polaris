@@ -26,11 +26,15 @@
   "dependencies": {
     "@fastify/cors": "11.3.0",
     "@fastify/multipart": "10.1.1",
+    "@polaris/ai": "*",
     "@polaris/db": "*",
     "@polaris/domain": "*",
     "@polaris/queue": "*",
     "@polaris/shared": "*",
     "@polaris/storage": "*",
     "fastify": "5.12.1"
+  },
+  "devDependencies": {
+    "@polaris/analyzer": "*"
   }
 }

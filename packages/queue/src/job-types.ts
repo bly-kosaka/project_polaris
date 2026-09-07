@@ -10,6 +10,10 @@ export interface CleanupExpiredRawLogsJobData {
   scheduledAt: string;
 }
 
+export interface AIExplanationJobData {
+  analysisId: string;
+}
+
 export const RAW_LOG_DELETE_JOB = 'raw-log-delete';
 export const CLEANUP_JOB = 'cleanup-expired-raw-logs';
 
@@ -25,6 +29,10 @@ export function buildAnalyzerJobId(analysisId: string): string {
 
 export function buildRawLogDeleteJobId(analysisId: string): string {
   return `raw-log-delete-${analysisId}`;
+}
+
+export function buildAiExplanationJobId(analysisId: string): string {
+  return `ai-explanation-${analysisId}`;
 }
 
 export function buildCleanupJobId(timeBucket: string): string {

@@ -1,6 +1,6 @@
 import type { Analysis, AnalysisStatus } from '@polaris/domain';
 import type { PrismaClientLike } from '../client.js';
-import { toPrismaAnalysisStatus, toPrismaAnalyzerStatus } from '../enum-mappers.js';
+import { toPrismaAiStatus, toPrismaAnalysisStatus, toPrismaAnalyzerStatus } from '../enum-mappers.js';
 import { DbError, mapPrismaError } from '../errors.js';
 import { toDomainObservationSetRecord } from '../observation-set/mapper.js';
 import { assertValidAnalysisStatusTransition } from '../status-transition.js';
@@ -14,6 +14,7 @@ function buildUpdateData(status: AnalysisStatus, fields?: UpdateAnalysisPersiste
   return {
     status: toPrismaAnalysisStatus(status),
     ...(fields?.analyzerStatus !== undefined ? { analyzerStatus: toPrismaAnalyzerStatus(fields.analyzerStatus) } : {}),
+    ...(fields?.aiStatus !== undefined ? { aiStatus: toPrismaAiStatus(fields.aiStatus) } : {}),
     ...(metadata?.originalFileName !== undefined ? { originalFileName: metadata.originalFileName } : {}),
     ...(metadata?.fileSizeBytes !== undefined ? { fileSizeBytes: metadata.fileSizeBytes } : {}),
     ...(metadata?.detectedLogFormat !== undefined ? { detectedLogFormat: metadata.detectedLogFormat } : {}),

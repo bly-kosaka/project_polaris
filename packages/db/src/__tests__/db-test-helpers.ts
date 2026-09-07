@@ -10,6 +10,7 @@ import { PrismaProjectRepository } from '../project/prisma-project-repository.js
  * another file's in-progress data.
  */
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
+  await prisma.aIExplanationRecord.deleteMany();
   await prisma.observationSetRecord.deleteMany();
   await prisma.analysisExecution.deleteMany();
   await prisma.uploadedAccessLog.deleteMany();

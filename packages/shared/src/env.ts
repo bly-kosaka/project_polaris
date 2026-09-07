@@ -34,9 +34,18 @@ const envSchema = z.object({
   // (40_Sprint_5_Plan_Review.md F-04).
   CORS_ORIGIN: z.string().min(1).default('http://localhost:5173'),
 
+  // AI Explanation (44_Development_Setup_and_Sixth_Sprint.md §118). Sprint 6
+  // only supports 'openai'; OPENAI_API_KEY/OPENAI_MODEL stay optional at the
+  // schema level (functionally required only once AI is actually invoked —
+  // CI's Fake Provider tests never need a real key, 46_Sprint_6_Plan_Final_Review.md).
+  AI_PROVIDER: z.enum(['openai']).default('openai'),
   OPENAI_API_KEY: z.string().optional(),
-  AI_EXPLANATION_MODEL: z.string().optional(),
-  AI_CHAT_MODEL: z.string().optional(),
+  OPENAI_MODEL: z.string().optional(),
+  OPENAI_REASONING_EFFORT: z.string().optional(),
+  AI_TIMEOUT_MS: z.coerce.number().int().positive().default(90000),
+  AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(4096),
+  AI_MAX_INPUT_BYTES: z.coerce.number().int().positive().default(200000),
+  AI_WORKER_CONCURRENCY: z.coerce.number().int().positive().default(1),
 
   CLERK_SECRET_KEY: z.string().optional(),
   CLERK_PUBLISHABLE_KEY: z.string().optional(),

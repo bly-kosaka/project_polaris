@@ -14,6 +14,10 @@
       "types": "./dist/analyzer-job-handler.d.ts",
       "default": "./dist/analyzer-job-handler.js"
     },
+    "./ai-explanation-job-handler": {
+      "types": "./dist/ai-explanation-job-handler.d.ts",
+      "default": "./dist/ai-explanation-job-handler.js"
+    },
     "./deps": {
       "types": "./dist/deps.d.ts",
       "default": "./dist/deps.js"
@@ -24,6 +28,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@polaris/ai": "*",
     "@polaris/analyzer": "*",
     "@polaris/db": "*",
     "@polaris/domain": "*",

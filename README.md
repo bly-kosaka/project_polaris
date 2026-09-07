@@ -2,7 +2,7 @@
 
 アクセスログを、人とAIが確認できる構造化された観測情報へ変換するプロダクト。
 
-設計書は [`md/`](md/) 配下にある。実装はまず `md/26_Development_Setup_and_First_Sprint.md` の Sprint 1（リポジトリ基盤 + Analyzer Parser / Normalizer）から開始している。UI・認証・課金・AI連携はまだ実装していない。
+設計書は [`md/`](md/) 配下にある。実装はまず `md/26_Development_Setup_and_First_Sprint.md` の Sprint 1（リポジトリ基盤 + Analyzer Parser / Normalizer）から開始している。認証・課金はまだ実装していない。
 
 ---
 
@@ -26,7 +26,7 @@ yarn install
 cp .env.example .env
 ```
 
-`DATABASE_URL` / `REDIS_URL` / `S3_*` / `APP_BASE_URL` は必須（`packages/shared` の Zod スキーマが起動時に検証し、不足時は Fail Fast する）。`MAX_UPLOAD_BYTES`（既定 50MB）/ `RAW_LOG_RETENTION_HOURS`（既定 24時間）はベンチマーク前の仮値で、両方とも Config化されており無制限にはならない。`OPENAI_API_KEY` / `CLERK_*` / `STRIPE_*` は該当機能が未実装のため現時点では任意。
+`DATABASE_URL` / `REDIS_URL` / `S3_*` / `APP_BASE_URL` は必須（`packages/shared` の Zod スキーマが起動時に検証し、不足時は Fail Fast する）。`MAX_UPLOAD_BYTES`（既定 50MB）/ `RAW_LOG_RETENTION_HOURS`（既定 24時間）/ `AI_MAX_OUTPUT_TOKENS`（既定 4096）/ `AI_MAX_INPUT_BYTES`（既定 200000 byte）はベンチマーク前の仮値で、いずれもConfig化されており無制限にはならない。`AI_PROVIDER`は既定`openai`（Sprint 6時点で対応するのはOpenAIのみ）。`OPENAI_MODEL`は実際にAI Explanationを動かす場合のみ必須（未設定でもCIは通る — 後述のFake AI Providerのみを使うため）。`OPENAI_API_KEY` / `OPENAI_REASONING_EFFORT` / `CLERK_*` / `STRIPE_*` は任意。
 
 `.env` はコミットしない。Secret Value を `.env.example` へ書かない。
 
@@ -104,6 +104,13 @@ GET  /projects/:projectId               Project詳細
 GET  /projects/:projectId/analyses      Project配下のAnalysis一覧
 ```
 
+Sprint 6でAI Explanation用のEndpointを追加した。Analyzer成功後、`Analysis.aiStatus`は`not_requested → queued → running → success | failed`と遷移する（`GET /analyses/:analysisId`のDTOで参照可能）。
+
+```text
+GET  /analyses/:analysisId/explanation        AI Explanation取得（未生成/失敗時は404/409）
+POST /analyses/:analysisId/explanation/retry  AI Explanationの再試行（失敗後のみ; 既存成功結果は再生成しない）
+```
+
 ### Web (Vue) をローカルで動かす
 
 API（`http://localhost:3001`）が起動している状態で、別Terminalで:
@@ -121,7 +128,7 @@ yarn test
 
 Analyzerのテストは [`fixtures/access-logs/`](fixtures/access-logs/) の合成データ（実案件ログは含まない）を使う。
 
-`apps/product-e2e` は apps/api・apps/worker・apps/webの実コードを1Processに組み合わせたProduct Integration Test（Project作成→Upload→実Worker処理→Polling→Result画面→Path Aggregation表示→行Click→Detail Drawer表示）。Docker ComposeのPostgreSQL/Redis/MinIOに対して実行するため、`apps/api` / `apps/worker` を先にBuildしておく必要がある（`exports`のSubpath経由でdist/を読むため）。
+`apps/product-e2e` は apps/api・apps/worker・apps/webの実コードを1Processに組み合わせたProduct Integration Test（Project作成→Upload→実Worker処理→Polling→Result画面→Path Aggregation表示→行Click→Detail Drawer表示→AI Explanation生成完了→Finding表示→関連データへの遷移）。Analyzer WorkerだけでなくAI Explanation Worker（`AIProvider`はFake実装 — 実OpenAI呼び出しはCIで一切行わない）も同一Processで起動する。Docker ComposeのPostgreSQL/Redis/MinIOに対して実行するため、`apps/api` / `apps/worker` を先にBuildしておく必要がある（`exports`のSubpath経由でdist/を読むため）。
 
 ```bash
 yarn build:backend
@@ -149,7 +156,7 @@ polaris/
 ├─ packages/
 │  ├─ domain/    Framework非依存のDomain型（Project / Analysis / UploadedAccessLog / AnalysisExecution 等）
 │  ├─ analyzer/  Analyzer Core（Parser / Normalizer / Aggregation / Known Information / ObservationSet）
-│  ├─ ai/        AI Explanation連携（未実装）
+│  ├─ ai/        AI Explanation連携（Prompt Builder / OpenAI Responses API Adapter / Schema・Grounding Validation）
 │  ├─ db/        Prisma Client / Repository（Project / Analysis / ObservationSetRecord /
 │  │              ProjectKnownInformation / UploadedAccessLog / AnalysisExecution）
 │  ├─ queue/     BullMQ Queue境界（Queue名 / Job Payload型 / Connection Factory / enqueue）
@@ -191,3 +198,13 @@ polaris/
 含む：`apps/web`（Project作成・一覧、Analysis作成・Upload・Processing Polling、Result画面のPath/Source IP/Status/Method/User-Agent/Time Aggregation Tab、Detail Drawer）、`apps/api`のProject/Analysis一覧・詳細Endpoint追加とError Response形式の統一、`apps/product-e2e`（実Infra上のProduct Integration Test）。
 
 含まない（意図的にスコープ外, `md/10_Output_Presentation.md`）：AI Explanation（Sprint 6）、Authentication、Billing、Health/Risk/Severity/Priority Score（恒久的にスコープ外）、Raw Log Viewer、WebSocket/SSE。
+
+### Sprint 6 のスコープ
+
+`md/44_Development_Setup_and_Sixth_Sprint.md` に対応する。
+
+含む：`packages/ai`（Prompt Builder / Zod Schema・Grounding Validation / OpenAI Responses API Adapter / Provider Registry）、AI Queue（`packages/queue`）とAI Explanation Worker（`apps/worker`、Analyzer成功後に自動Enqueue、`Analysis.aiStatus`のLifecycle管理、Retry Classification、Crash-after-Persist Recovery）、`AIExplanationRecord`のPersistence（`packages/db`）、`apps/api`のAI Explanation取得・再試行Endpoint、`apps/web`のResult画面AI Section（Overall Urgency / AI Summary / Findings / Retry UI、Aggregationへの関連データ遷移）、`apps/product-e2e`へのAI Worker追加。
+
+最重要不変条件（`md/44_Development_Setup_and_Sixth_Sprint.md`）：AIの失敗はAnalyzerの失敗として見せない（`Analysis.status`は常に`completed`のまま、`aiStatus`だけが`failed`になる）。AI出力はAnalyzerの観測事実と視覚的に区別する（Fact/Interpretationのセクション分離、常に「AIによる」ラベル付き）。Risk/Severity/Priority/Finding単位のUrgencyは存在しない — `overallUrgency`は「どの程度早く確認すべきか」のみを表す。Raw Access LogはAIへ一切送信しない（送信対象はObservationSetのみ）。CIは実OpenAI呼び出しを一切行わず、Worker/API/Product Integration Testの全てでFake AI Providerのみを使う。
+
+含まない（意図的にスコープ外）：AI Provider選択UI（`AI_PROVIDER`は`openai`固定）、Billing/Entitlementによる機能制限、Chat形式のAI対話（`PromptPurpose`は`'initial_summary'`のみ）、Production Deploy。

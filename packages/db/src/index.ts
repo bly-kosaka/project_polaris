@@ -2,6 +2,7 @@ export { prisma, type PrismaClientLike } from './client.js';
 export { DbError, mapPrismaError, type DbErrorCode } from './errors.js';
 export { assertValidAnalysisStatusTransition } from './status-transition.js';
 export { persistAnalyzerFailure, persistAnalyzerSuccess } from './persist-analyzer-result.js';
+export { persistAiExplanationFailure, persistAiExplanationSuccess } from './persist-ai-explanation-result.js';
 export { persistUploadedAccessLog } from './persist-upload.js';
 export {
   toPrismaAnalysisStatus,
@@ -67,3 +68,10 @@ export type {
   AnalysisExecutionRepository,
 } from './analysis-execution/index.js';
 export { toDomainAnalysisExecution, PrismaAnalysisExecutionRepository } from './analysis-execution/index.js';
+
+export type {
+  AIExplanationRecord,
+  CreateAIExplanationRecordInput,
+  AIExplanationRepository,
+} from './ai-explanation/index.js';
+export { toDomainAiExplanationRecord, PrismaAIExplanationRepository } from './ai-explanation/index.js';

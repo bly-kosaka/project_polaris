@@ -6,6 +6,11 @@ import ErrorState from '../components/ErrorState.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import TabNav, { type TabNavItem } from '../components/TabNav.vue';
 import DataLimitationPanel from '../components/DataLimitationPanel.vue';
+import AIStatusPanel from '../components/ai/AIStatusPanel.vue';
+import OverallUrgencyCard from '../components/ai/OverallUrgencyCard.vue';
+import AISummary from '../components/ai/AISummary.vue';
+import FindingList from '../components/ai/FindingList.vue';
+import AIDataLimitations from '../components/ai/AIDataLimitations.vue';
 import DetailDrawer from '../components/DetailDrawer.vue';
 import KeyValueList, { type KeyValueItem } from '../components/KeyValueList.vue';
 import DistributionList from '../components/DistributionList.vue';
@@ -17,9 +22,11 @@ import MethodTable from '../components/aggregation/MethodTable.vue';
 import UserAgentTable from '../components/aggregation/UserAgentTable.vue';
 import TimeTable from '../components/aggregation/TimeTable.vue';
 import { useObservationSet } from '../composables/useObservationSet';
+import { useAIExplanation } from '../composables/useAIExplanation';
 import { getAnalysis } from '../api/analyses';
 import { getProject } from '../api/projects';
 import { analysisStatusLabel, analyzerStatusLabel } from '../utils/statusLabels';
+import { resolveAiReference } from '../utils/aiReferenceResolver';
 import type { AnalysisDetailDto, ProjectDetailDto } from '../types/dto';
 import type {
   PathAggregationDto,
@@ -56,6 +63,7 @@ async function loadAnalysis(): Promise<void> {
 onMounted(() => void loadAnalysis());
 
 const { observationSet, error: observationError, isLoading } = useObservationSet(props.analysisId);
+const { aiStatus, aiExplanation, retry: retryAiExplanation } = useAIExplanation(props.analysisId);
 
 type TabKey = 'path' | 'sourceIp' | 'status' | 'method' | 'userAgent' | 'time';
 
@@ -138,6 +146,21 @@ function goToPath(path: string): void {
 function goToSourceIp(sourceIp: string): void {
   activeTab.value = 'sourceIp';
   searchQuery.value = sourceIp;
+  closeDrawer();
+}
+
+/**
+ * A Finding/Overall Urgency evidence-link click (md/44 §72-73) — resolves
+ * `groupId` to a tab + display value via the already-loaded ObservationSet,
+ * then reuses the same tab-switch-plus-search mechanism goToPath/goToSourceIp
+ * already use.
+ */
+function onNavigateReference(groupId: string): void {
+  if (!observationSet.value) return;
+  const resolved = resolveAiReference(observationSet.value, groupId);
+  if (!resolved) return;
+  activeTab.value = resolved.tab;
+  searchQuery.value = resolved.searchValue;
   closeDrawer();
 }
 
@@ -225,6 +248,18 @@ const drawerTitle = computed(() => {
         :redaction="observationSet.redaction"
         :exclusion="observationSet.exclusion"
       />
+
+      <AIStatusPanel
+        v-if="aiStatus === 'queued' || aiStatus === 'running' || aiStatus === 'failed'"
+        :ai-status="aiStatus"
+        @retry="retryAiExplanation"
+      />
+      <template v-if="aiStatus === 'success' && aiExplanation">
+        <OverallUrgencyCard :urgency="aiExplanation.overallUrgency" @navigate-reference="onNavigateReference" />
+        <AISummary :summary="aiExplanation.summary" />
+        <FindingList :findings="aiExplanation.findings" @navigate-reference="onNavigateReference" />
+        <AIDataLimitations :data-limitations="aiExplanation.dataLimitations" />
+      </template>
 
       <TabNav :model-value="activeTab" :tabs="TABS" class="analysis-result-page__tabs" @update:model-value="onManualTabChange" />
 

@@ -3,6 +3,7 @@ import multipart from '@fastify/multipart';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { ApiDeps } from './deps.js';
 import { sendApiError } from './errors.js';
+import { registerAiExplanationRoutes } from './routes/ai-explanation.js';
 import { registerAnalysesRoutes } from './routes/analyses.js';
 import { registerProjectsRoutes } from './routes/projects.js';
 
@@ -18,6 +19,7 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
   await app.register(multipart, { limits: { fileSize: deps.maxUploadBytes } });
   registerProjectsRoutes(app, deps);
   registerAnalysesRoutes(app, deps);
+  registerAiExplanationRoutes(app, deps);
 
   // Global Error Boundary (42_Sprint_5_Review.md M-01): every route above
   // already converts its own known error cases via sendApiError(), but an

@@ -5,5 +5,5 @@
     "rootDir": "src"
   },
   "include": ["src"],
-  "references": [{ "path": "../domain" }, { "path": "../analyzer" }]
+  "references": [{ "path": "../domain" }, { "path": "../analyzer" }, { "path": "../ai" }]
 }

@@ -45,4 +45,14 @@ describe('loadEnv', () => {
     expect(env.MAX_UPLOAD_BYTES).toBe(1000);
     expect(env.RAW_LOG_RETENTION_HOURS).toBe(48);
   });
+
+  it('defaults AI_PROVIDER and the AI numeric limits when absent, leaving OPENAI_MODEL unset', () => {
+    const env = loadEnv(validEnv);
+    expect(env.AI_PROVIDER).toBe('openai');
+    expect(env.OPENAI_MODEL).toBeUndefined();
+    expect(env.AI_TIMEOUT_MS).toBe(90000);
+    expect(env.AI_MAX_OUTPUT_TOKENS).toBe(4096);
+    expect(env.AI_MAX_INPUT_BYTES).toBe(200000);
+    expect(env.AI_WORKER_CONCURRENCY).toBe(1);
+  });
 });

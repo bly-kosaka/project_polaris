@@ -125,6 +125,7 @@ model Analysis {
   observationSet     ObservationSetRecord?
   uploadedAccessLog  UploadedAccessLog?
   executions         AnalysisExecution[]
+  aiExplanation      AIExplanationRecord?
 
   @@index([projectId])
 }
@@ -197,4 +198,30 @@ model AnalysisExecution {
   createdAt DateTime @default(now())
 
   @@unique([analysisId, type])
+}
+
+// analysisId @unique is the DB-level enforcement of "1 Analysis = max 1
+// AIExplanationRecord" (44_Development_Setup_and_Sixth_Sprint.md §45/§90) —
+// a second insert for the same Analysis throws P2002, same pattern as
+// ObservationSetRecord. Raw Prompt / Raw AI Response / Reasoning are never
+// stored here (§44).
+model AIExplanationRecord {
+  id         String   @id @default(cuid())
+  analysisId String   @unique
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  schemaVersion String
+  promptVersion String
+  provider      String
+  model         String
+
+  data Json
+
+  providerResponseId String?
+  inputTokens        Int?
+  outputTokens       Int?
+  totalTokens        Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

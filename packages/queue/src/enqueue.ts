@@ -1,6 +1,13 @@
 import type { Job, Queue } from 'bullmq';
-import { buildAnalyzerJobId, buildCleanupJobId, buildRawLogDeleteJobId, CLEANUP_JOB, RAW_LOG_DELETE_JOB } from './job-types.js';
-import type { AnalyzerJobData, CleanupExpiredRawLogsJobData, RawLogDeleteJobData } from './job-types.js';
+import {
+  buildAiExplanationJobId,
+  buildAnalyzerJobId,
+  buildCleanupJobId,
+  buildRawLogDeleteJobId,
+  CLEANUP_JOB,
+  RAW_LOG_DELETE_JOB,
+} from './job-types.js';
+import type { AIExplanationJobData, AnalyzerJobData, CleanupExpiredRawLogsJobData, RawLogDeleteJobData } from './job-types.js';
 
 /**
  * Numbers are pre-benchmark placeholders (34_Development_Setup_and_Fourth_Sprint.md §43).
@@ -12,6 +19,26 @@ const ANALYZER_JOB_OPTIONS = {
 
 export async function enqueueAnalyzerJob(queue: Queue<AnalyzerJobData>, analysisId: string): Promise<Job<AnalyzerJobData>> {
   return queue.add('analyzer', { analysisId }, { ...ANALYZER_JOB_OPTIONS, jobId: buildAnalyzerJobId(analysisId) });
+}
+
+/**
+ * Numbers are pre-benchmark placeholders, same convention as
+ * ANALYZER_JOB_OPTIONS (44_Development_Setup_and_Sixth_Sprint.md §52).
+ */
+const AI_EXPLANATION_JOB_OPTIONS = {
+  attempts: 3,
+  backoff: { type: 'exponential' as const, delay: 5000 },
+};
+
+export async function enqueueAiExplanationJob(
+  queue: Queue<AIExplanationJobData>,
+  analysisId: string,
+): Promise<Job<AIExplanationJobData>> {
+  return queue.add(
+    'ai-explanation',
+    { analysisId },
+    { ...AI_EXPLANATION_JOB_OPTIONS, jobId: buildAiExplanationJobId(analysisId) },
+  );
 }
 
 export async function enqueueRawLogDeleteJob(

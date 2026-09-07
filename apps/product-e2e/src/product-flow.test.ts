@@ -6,22 +6,67 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '@polaris/db';
 import {
+  AI_EXPLANATION_QUEUE,
   ANALYZER_QUEUE,
+  createAiExplanationQueue,
   createAnalyzerQueue,
   createMaintenanceQueue,
   createProducerConnection,
   createWorkerConnection,
 } from '@polaris/queue';
-import type { AnalyzerJobData } from '@polaris/queue';
+import type { AIExplanationJobData, AnalyzerJobData } from '@polaris/queue';
 import { ensureBucket, S3TemporaryObjectStorage } from '@polaris/storage';
 import { Worker } from 'bullmq';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '@polaris/api/server';
 import type { ApiDeps } from '@polaris/api/deps';
 import { handleAnalyzerJob } from '@polaris/worker/analyzer-job-handler';
+import { handleAiExplanationJob } from '@polaris/worker/ai-explanation-job-handler';
 import type { WorkerDeps } from '@polaris/worker/deps';
+import { collectObservationGroupIds } from '@polaris/ai';
+import type { AIProvider, AIProviderRequest, AIProviderResult } from '@polaris/ai';
+import type { ObservationSet } from '@polaris/analyzer';
 import App from '@polaris/web/src/App.vue';
 import { router } from '@polaris/web/src/router/index';
+
+/**
+ * The one and only "Provider" ever invoked in this suite
+ * (44_Development_Setup_and_Sixth_Sprint.md §99/§104/A6-24) — a real
+ * `WorkerDeps.aiProvider` substitution (46_Sprint_6_Plan_Final_Review.md
+ * F-06), never a real OpenAI call. Extracts a real `groupId` from the
+ * prompt's embedded `<observation_set>` block so Grounding Validation
+ * passes against the real ObservationSet the Analyzer just produced.
+ */
+class FakeAIProvider implements AIProvider {
+  async generateExplanation(request: AIProviderRequest): Promise<AIProviderResult> {
+    const match = /<observation_set>([\s\S]*)<\/observation_set>/.exec(request.prompt.userPrompt);
+    const observationSet = JSON.parse(match![1]!) as ObservationSet;
+    const [groupId] = collectObservationGroupIds(observationSet);
+
+    return {
+      provider: 'openai',
+      model: 'fake-model',
+      output: {
+        summary: 'Product E2E Fake summary.',
+        overallUrgency: { level: 'normal', reason: 'Product E2E fake reason.', references: [{ groupId }], limitations: [] },
+        findings: [
+          {
+            title: 'Product E2E Fake Finding',
+            observation: 'Observed via the Product E2E FakeAIProvider.',
+            interpretation: null,
+            limitation: null,
+            nextChecks: ['Check the referenced Aggregation row.'],
+            references: [{ groupId }],
+          },
+        ],
+        overallNotes: [],
+        dataLimitations: [],
+      },
+      providerResponseId: 'fake-response-id',
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+    };
+  }
+}
 
 /**
  * Product Integration Test (40_Sprint_5_Plan_Review.md F-05 / decision 12):
@@ -42,9 +87,11 @@ const validLog = readFileSync(path.join(repoRoot, 'fixtures', 'access-logs', 'va
 
 let apiServer: FastifyInstance;
 let analyzerWorker: Worker<AnalyzerJobData>;
+let aiExplanationWorker: Worker<AIExplanationJobData>;
 let teardownFns: Array<() => Promise<void>> = [];
 
 beforeAll(async () => {
+  await prisma.aIExplanationRecord.deleteMany();
   await prisma.observationSetRecord.deleteMany();
   await prisma.analysisExecution.deleteMany();
   await prisma.uploadedAccessLog.deleteMany();
@@ -67,11 +114,14 @@ beforeAll(async () => {
   const producerConnection = createProducerConnection(process.env.REDIS_URL ?? 'redis://localhost:16379');
   const analyzerQueue = createAnalyzerQueue(producerConnection);
   await analyzerQueue.obliterate({ force: true });
+  const aiExplanationQueue = createAiExplanationQueue(producerConnection);
+  await aiExplanationQueue.obliterate({ force: true });
 
   const apiDeps: ApiDeps = {
     prisma,
     storage,
     analyzerQueue,
+    aiExplanationQueue,
     maxUploadBytes: 52428800,
     rawLogRetentionHours: 24,
     // Must match vitest.config.ts's `environmentOptions.happyDOM.url` — the
@@ -83,18 +133,40 @@ beforeAll(async () => {
 
   const workerConnection = createWorkerConnection(process.env.REDIS_URL ?? 'redis://localhost:16379');
   const maintenanceQueue = createMaintenanceQueue(workerConnection);
-  const workerDeps: WorkerDeps = { prisma, storage, maintenanceQueue };
+  const workerDeps: WorkerDeps = {
+    prisma,
+    storage,
+    maintenanceQueue,
+    aiExplanationQueue,
+    aiModelConfig: {
+      provider: 'openai',
+      model: 'fake-model',
+      maxOutputTokens: 4096,
+      timeoutMs: 90000,
+      maxInputBytes: 200000,
+    },
+    aiProvider: new FakeAIProvider(),
+  };
   analyzerWorker = new Worker<AnalyzerJobData>(ANALYZER_QUEUE, (job) => handleAnalyzerJob(job, workerDeps), {
     connection: workerConnection,
     concurrency: 1,
   });
   await analyzerWorker.waitUntilReady();
 
+  aiExplanationWorker = new Worker<AIExplanationJobData>(
+    AI_EXPLANATION_QUEUE,
+    (job) => handleAiExplanationJob(job, workerDeps),
+    { connection: workerConnection, concurrency: 1 },
+  );
+  await aiExplanationWorker.waitUntilReady();
+
   teardownFns = [
     () => apiServer.close(),
     () => analyzerWorker.close(),
+    () => aiExplanationWorker.close(),
     () => maintenanceQueue.close(),
     () => analyzerQueue.close(),
+    () => aiExplanationQueue.close(),
     async () => {
       producerConnection.disconnect();
       workerConnection.disconnect();
@@ -152,6 +224,22 @@ describe('Product flow', () => {
 
     expect(wrapper.find('.detail-drawer').exists()).toBe(true);
     expect(wrapper.find('.detail-drawer__title').text()).toBe('/index.html');
+
+    // --- AI Explanation: the real AI Worker (Fake Provider) processes the
+    // job scheduleInitialAiExplanation enqueued right after Analyzer
+    // success; AI Summary/Finding appear once it completes ---
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Product E2E Fake summary.'), { timeout: 30000 });
+    expect(wrapper.text()).toContain('AIによる要約');
+    expect(wrapper.text()).toContain('Product E2E Fake Finding');
+
+    // --- Finding evidence link -> tab switch + search prefill ---
+    const referenceButton = wrapper.find('.finding-card__reference');
+    expect(referenceButton.exists()).toBe(true);
+    await referenceButton.trigger('click');
+    await flushPromises();
+
+    const searchInput = wrapper.find('.analysis-result-page__search');
+    expect((searchInput.element as HTMLInputElement).value.length).toBeGreaterThan(0);
 
     wrapper.unmount();
   });

@@ -18,6 +18,9 @@ export type ApiErrorCode =
   | 'UPLOAD_PERSIST_FAILED'
   | 'OBSERVATION_SET_NOT_READY'
   | 'ANALYSIS_FAILED'
+  | 'AI_EXPLANATION_NOT_READY'
+  | 'AI_EXPLANATION_FAILED'
+  | 'AI_EXPLANATION_ALREADY_EXISTS'
   | 'INTERNAL_ERROR';
 
 export function sendApiError(reply: FastifyReply, status: number, code: ApiErrorCode, message: string) {

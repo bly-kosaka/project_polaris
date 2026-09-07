@@ -1,4 +1,4 @@
-import type { Analysis, AnalysisStatus, AnalyzerStatus, UploadedAccessLog } from '@polaris/domain';
+import type { AIStatus, Analysis, AnalysisStatus, AnalyzerStatus, UploadedAccessLog } from '@polaris/domain';
 import type { AnalysisListItem } from '@polaris/db';
 
 /** Backs `GET /projects/:projectId/analyses`. */
@@ -7,6 +7,8 @@ export interface AnalysisSummaryDto {
   projectId: string;
   status: AnalysisStatus;
   analyzerStatus?: AnalyzerStatus;
+  /** Always present — defaults to 'not_requested' at the domain layer (decision 9). */
+  aiStatus: AIStatus;
   createdAt: string;
   updatedAt: string;
   originalFileName?: string;
@@ -27,6 +29,8 @@ export interface AnalysisDetailDto {
   projectId: string;
   status: AnalysisStatus;
   analyzerStatus?: AnalyzerStatus;
+  /** Always present — defaults to 'not_requested' at the domain layer (decision 9). */
+  aiStatus: AIStatus;
   createdAt: string;
   updatedAt: string;
   originalFileName?: string;
@@ -39,6 +43,7 @@ export function toAnalysisSummaryDto(item: AnalysisListItem): AnalysisSummaryDto
     projectId: item.projectId,
     status: item.status,
     ...(item.analyzerStatus !== undefined ? { analyzerStatus: item.analyzerStatus } : {}),
+    aiStatus: item.aiStatus,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
     ...(item.originalFileName !== undefined ? { originalFileName: item.originalFileName } : {}),
@@ -53,6 +58,7 @@ export function toAnalysisDetailDto(analysis: Analysis, uploadedAccessLog: Uploa
     projectId: analysis.projectId,
     status: analysis.status,
     ...(analysis.analyzerStatus !== undefined ? { analyzerStatus: analysis.analyzerStatus } : {}),
+    aiStatus: analysis.aiStatus,
     createdAt: analysis.createdAt,
     updatedAt: analysis.updatedAt,
     ...(uploadedAccessLog !== null ? { originalFileName: uploadedAccessLog.originalFileName } : {}),

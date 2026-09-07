@@ -18,6 +18,10 @@ export type AnalysisStatus =
 
 export type AnalyzerStatus = 'queued' | 'running' | 'success' | 'partial' | 'failed';
 
+export type AIStatus = 'not_requested' | 'queued' | 'running' | 'success' | 'failed';
+
+export type UrgencyLevel = 'low' | 'normal' | 'high' | 'immediate';
+
 export type ProjectStatus = 'active' | 'archived';
 
 export interface ProjectSummaryDto {
@@ -43,6 +47,7 @@ export interface AnalysisSummaryDto {
   projectId: string;
   status: AnalysisStatus;
   analyzerStatus?: AnalyzerStatus;
+  aiStatus: AIStatus;
   createdAt: string;
   updatedAt: string;
   originalFileName?: string;
@@ -55,6 +60,7 @@ export interface AnalysisDetailDto {
   projectId: string;
   status: AnalysisStatus;
   analyzerStatus?: AnalyzerStatus;
+  aiStatus: AIStatus;
   createdAt: string;
   updatedAt: string;
   originalFileName?: string;

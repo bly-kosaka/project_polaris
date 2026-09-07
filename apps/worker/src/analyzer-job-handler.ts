@@ -15,6 +15,7 @@ import type { AnalyzerJobData } from '@polaris/queue';
 import type { WorkerDeps } from './deps.js';
 import { reconcileExecutionAfterPersist, reconcileRawLogDeletion } from './reconcile-recovery.js';
 import { AnalyzerFatalResultError, classifyRetryability, safeErrorCodeFor } from './retry-classification.js';
+import { scheduleInitialAiExplanation } from './schedule-ai-explanation.js';
 import { linesFromStream } from './stream-lines.js';
 
 type FinalizeResult = { persisted: true } | { persisted: false; error: unknown };
@@ -242,6 +243,11 @@ export async function handleAnalyzerJob(job: Job<AnalyzerJobData>, deps: WorkerD
         analyzerStatus: result.analyzerStatus,
         observationSet: result.observationSet,
       });
+      // Analyzer success -> AI enqueue boundary (44_Development_Setup_and_Sixth_Sprint.md
+      // §53/§86): the only place AI Explanation is ever scheduled. Never
+      // throws — an AI-scheduling failure must never turn this successful
+      // Analyzer job into a failure (§54).
+      await scheduleInitialAiExplanation(analysisId, deps);
       await reconcileRawLogDeletion(analysisId, deps); // F-09 on delete failure, never throws
       await executionRepository.updateProgress(analysisId, 'analyzer', {
         status: result.analyzerStatus,

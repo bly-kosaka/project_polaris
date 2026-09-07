@@ -1,4 +1,4 @@
-import type { Analysis, AnalysisMetadata, AnalyzerStatus } from '@polaris/domain';
+import type { AIStatus, Analysis, AnalysisMetadata, AnalyzerStatus } from '@polaris/domain';
 
 export interface CreateAnalysisPersistenceInput {
   projectId: string;
@@ -6,6 +6,7 @@ export interface CreateAnalysisPersistenceInput {
 
 export interface UpdateAnalysisPersistenceFields {
   analyzerStatus?: AnalyzerStatus;
+  aiStatus?: AIStatus;
   metadata?: Partial<AnalysisMetadata>;
 }
 

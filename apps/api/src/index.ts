@@ -1,6 +1,6 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { prisma } from '@polaris/db';
-import { createAnalyzerQueue, createProducerConnection } from '@polaris/queue';
+import { createAiExplanationQueue, createAnalyzerQueue, createProducerConnection } from '@polaris/queue';
 import { loadEnv } from '@polaris/shared';
 import { ensureBucket, S3TemporaryObjectStorage } from '@polaris/storage';
 import type { ApiDeps } from './deps.js';
@@ -23,6 +23,7 @@ async function main(): Promise<void> {
     prisma,
     storage: new S3TemporaryObjectStorage(s3Client, env.S3_BUCKET),
     analyzerQueue: createAnalyzerQueue(connection),
+    aiExplanationQueue: createAiExplanationQueue(connection),
     maxUploadBytes: env.MAX_UPLOAD_BYTES,
     rawLogRetentionHours: env.RAW_LOG_RETENTION_HOURS,
     corsOrigin: env.CORS_ORIGIN,
