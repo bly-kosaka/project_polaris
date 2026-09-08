@@ -7,7 +7,17 @@ import { SignIn } from '@clerk/vue';
 
 <template>
   <div class="sign-in-page">
-    <SignIn routing="path" path="/sign-in" sign-up-url="/sign-up" />
+    <!--
+      routing="virtual" (the default when routing/path are both omitted) —
+      Clerk manages every multi-step sub-state (e.g. email verification)
+      internally without ever pushing a browser URL like
+      "/sign-in/factor-one". routing="path" instead expects the host router
+      to have a matching route for every such sub-path, which Vue Router
+      does not here, and silently breaks mid-flow (missing e.g. the email
+      verification code screen) — this was a live bug during Sprint 7's
+      manual Clerk smoke test, not just a theoretical concern.
+    -->
+    <SignIn sign-up-url="/sign-up" />
   </div>
 </template>
 

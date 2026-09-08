@@ -7,7 +7,8 @@ import { SignUp } from '@clerk/vue';
 
 <template>
   <div class="sign-up-page">
-    <SignUp routing="path" path="/sign-up" sign-in-url="/sign-in" />
+    <!-- routing="virtual" (default) — see SignInPage.vue's comment. -->
+    <SignUp sign-in-url="/sign-in" />
   </div>
 </template>
 
