@@ -77,4 +77,23 @@ describe('App.vue auth gating (T-AUTH-13a/13b)', () => {
     expect(router.currentRoute.value.name).toBe('sign-in');
     expect(listProjects).not.toHaveBeenCalled();
   });
+
+  it('T-AUTH-16a (55_Sprint_7_Independent_Review.md M-01): a reactive Clerk sign-out on an already-mounted Protected page redirects to Sign In', async () => {
+    vi.spyOn(projectsApi, 'listProjects').mockResolvedValue([]);
+    await router.push('/projects');
+    await router.isReady();
+
+    wrapper = mount(App, { global: { plugins: [router] } });
+
+    // Reach the normal signed-in, fully-loaded steady state first.
+    mockIsLoaded.value = true;
+    mockIsSignedIn.value = true;
+    await vi.waitFor(() => expect(isAuthLoaded.value).toBe(true));
+    expect(router.currentRoute.value.name).toBe('project-list');
+
+    // Session revoked/expired elsewhere (another tab, server-side) — Clerk
+    // itself flips isSignedIn without any new Navigation ever happening.
+    mockIsSignedIn.value = false;
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('sign-in'));
+  });
 });

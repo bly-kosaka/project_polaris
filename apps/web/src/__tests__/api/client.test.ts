@@ -1,10 +1,11 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { apiFetch, ApiError, setTokenGetter } from '../../api/client';
+import { apiFetch, ApiError, setAuthenticationFailureHandler, setTokenGetter } from '../../api/client';
 
 describe('apiFetch', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     setTokenGetter(undefined);
+    setAuthenticationFailureHandler(undefined);
   });
 
   it('returns parsed JSON on a successful response', async () => {
@@ -98,5 +99,37 @@ describe('apiFetch', () => {
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe('AUTHENTICATION_UNAVAILABLE');
     expect((error as ApiError).status).toBe(503);
+  });
+
+  it.each(['AUTHENTICATION_REQUIRED', 'AUTHENTICATION_INVALID'])(
+    'T-AUTH-16b (55_Sprint_7_Independent_Review.md M-01): invokes the authentication failure handler on a %s response',
+    async (code) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code, message: 'x' } }), { status: 401 })),
+      );
+      const handler = vi.fn();
+      setAuthenticationFailureHandler(handler);
+
+      await expect(apiFetch('/projects')).rejects.toThrow();
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect((handler.mock.calls[0]?.[0] as ApiError).code).toBe(code);
+    },
+  );
+
+  it('T-AUTH-16b: never invokes the authentication failure handler on a 503 AUTHENTICATION_UNAVAILABLE response (F-02)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { code: 'AUTHENTICATION_UNAVAILABLE', message: 'x' } }), {
+          status: 503,
+        }),
+      ),
+    );
+    const handler = vi.fn();
+    setAuthenticationFailureHandler(handler);
+
+    await expect(apiFetch('/projects')).rejects.toThrow();
+    expect(handler).not.toHaveBeenCalled();
   });
 });

@@ -3,7 +3,7 @@ import { useAuth } from '@clerk/vue';
 import { watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { isAuthLoaded, isSignedIn } from './auth/auth-state.js';
-import { setTokenGetter } from './api/client.js';
+import { setAuthenticationFailureHandler, setTokenGetter } from './api/client.js';
 import AppShell from './layouts/AppShell.vue';
 import LoadingState from './components/LoadingState.vue';
 
@@ -13,8 +13,34 @@ import LoadingState from './components/LoadingState.vue';
 const { isLoaded, isSignedIn: clerkSignedIn, getToken } = useAuth();
 const router = useRouter();
 
-watch(clerkSignedIn, (value) => {
-  isSignedIn.value = value ?? false;
+/**
+ * Redirects AWAY from the current route to Sign In when it's Protected —
+ * used both by a reactive Clerk sign-out (session expiry/revocation, or
+ * signing out in another tab) and by a Backend-reported 401 on an
+ * already-mounted page (55_Sprint_7_Independent_Review.md M-01). Neither
+ * case is covered by router.beforeEach alone, since that guard only fires
+ * on the NEXT Navigation — a page already mounted stays mounted otherwise.
+ */
+async function redirectToSignInIfProtected(): Promise<void> {
+  const current = router.currentRoute.value;
+  if (current.meta.requiresAuth) {
+    await router.replace({ name: 'sign-in', query: { redirect: current.fullPath } });
+  }
+}
+
+setAuthenticationFailureHandler(() => redirectToSignInIfProtected());
+
+watch(clerkSignedIn, async (value) => {
+  const nowSignedIn = value ?? false;
+  isSignedIn.value = nowSignedIn;
+
+  // Only a REACTIVE sign-out (auth state already resolved once, now
+  // flipping to signed-out) needs to force a redirect here — the initial
+  // load's own transition is handled entirely by the isLoaded watcher
+  // below (F-07), and re-deciding it here too would race it.
+  if (isAuthLoaded.value && !nowSignedIn) {
+    await redirectToSignInIfProtected();
+  }
 });
 
 // F-07: closes the "Initial Navigation" race — router.beforeEach resolves
@@ -32,9 +58,8 @@ watch(
     setTokenGetter(() => getToken.value());
     isSignedIn.value = clerkSignedIn.value ?? false;
 
-    const current = router.currentRoute.value;
-    if (current.meta.requiresAuth && !isSignedIn.value) {
-      await router.replace({ name: 'sign-in', query: { redirect: current.fullPath } });
+    if (!isSignedIn.value) {
+      await redirectToSignInIfProtected();
     }
     isAuthLoaded.value = true;
   },
