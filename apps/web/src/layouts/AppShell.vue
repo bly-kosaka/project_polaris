@@ -17,6 +17,7 @@ const { user } = useUser();
     <div class="app-shell__body">
       <nav class="app-shell__nav" aria-label="メインナビゲーション">
         <RouterLink to="/projects" class="app-shell__nav-link">Projects</RouterLink>
+        <RouterLink to="/billing" class="app-shell__nav-link">Billing</RouterLink>
       </nav>
       <main class="app-shell__main">
         <slot />

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { mount, flushPromises } from '@vue/test-utils';
+import { mount, flushPromises, RouterLinkStub } from '@vue/test-utils';
 import AnalysisResultPage from '../../pages/AnalysisResultPage.vue';
 import * as analysesApi from '../../api/analyses';
 import * as projectsApi from '../../api/projects';
@@ -396,6 +396,43 @@ describe('AnalysisResultPage', () => {
     const searchInput = wrapper.find('.analysis-result-page__search');
     expect((searchInput.element as HTMLInputElement).value).toBe('203.0.113.1');
     expect(wrapper.text()).toContain('203.0.113.1');
+
+    wrapper.unmount();
+  });
+
+  it('T-WEB-BILL-03: shows the Entitlement Required notice with an upgrade link when a Retry comes back 403', async () => {
+    vi.spyOn(analysesApi, 'getAnalysis').mockResolvedValue({
+      id: 'a1',
+      projectId: 'p1',
+      status: 'completed',
+      aiStatus: 'failed',
+      createdAt: 'x',
+      updatedAt: 'x',
+    });
+    vi.spyOn(projectsApi, 'getProject').mockImplementation(mockProject);
+    vi.spyOn(analysesApi, 'getObservationSet').mockResolvedValue(baseObservationSet());
+    vi.spyOn(aiExplanationApi, 'retryAiExplanation').mockRejectedValue(
+      new ApiError(403, 'ENTITLEMENT_REQUIRED', 'This feature requires the Pro plan.'),
+    );
+
+    const wrapper = mount(AnalysisResultPage, {
+      props: { analysisId: 'a1' },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    });
+    await flushPromises();
+
+    expect(wrapper.find('.entitlement-required-notice').exists()).toBe(false);
+
+    const retryButton = wrapper.find('.ai-status-panel__retry');
+    expect(retryButton.exists()).toBe(true);
+    await retryButton.trigger('click');
+    await flushPromises();
+
+    const notice = wrapper.find('.entitlement-required-notice');
+    expect(notice.exists()).toBe(true);
+    expect(notice.text()).toContain('Pro機能');
+    const link = wrapper.findComponent(RouterLinkStub);
+    expect(link.props('to')).toBe('/billing');
 
     wrapper.unmount();
   });

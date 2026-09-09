@@ -56,6 +56,12 @@ export const router = createRouter({
       props: true,
       meta: { requiresAuth: true },
     },
+    {
+      path: '/billing',
+      name: 'billing',
+      component: () => import('../pages/BillingPage.vue'),
+      meta: { requiresAuth: true },
+    },
     { path: '/sign-in', name: 'sign-in', component: () => import('../pages/SignInPage.vue') },
     { path: '/sign-up', name: 'sign-up', component: () => import('../pages/SignUpPage.vue') },
     {

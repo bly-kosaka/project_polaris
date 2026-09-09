@@ -7,6 +7,7 @@ import StatusBadge from '../components/StatusBadge.vue';
 import TabNav, { type TabNavItem } from '../components/TabNav.vue';
 import DataLimitationPanel from '../components/DataLimitationPanel.vue';
 import AIStatusPanel from '../components/ai/AIStatusPanel.vue';
+import EntitlementRequiredNotice from '../components/EntitlementRequiredNotice.vue';
 import OverallUrgencyCard from '../components/ai/OverallUrgencyCard.vue';
 import AISummary from '../components/ai/AISummary.vue';
 import FindingList from '../components/ai/FindingList.vue';
@@ -25,6 +26,7 @@ import { useObservationSet } from '../composables/useObservationSet';
 import { useAIExplanation } from '../composables/useAIExplanation';
 import { getAnalysis } from '../api/analyses';
 import { getProject } from '../api/projects';
+import { ApiError } from '../api/client';
 import { analysisStatusLabel, analyzerStatusLabel } from '../utils/statusLabels';
 import { resolveAiReference } from '../utils/aiReferenceResolver';
 import type { AnalysisDetailDto, ProjectDetailDto } from '../types/dto';
@@ -63,7 +65,13 @@ async function loadAnalysis(): Promise<void> {
 onMounted(() => void loadAnalysis());
 
 const { observationSet, error: observationError, isLoading } = useObservationSet(props.analysisId);
-const { aiStatus, aiExplanation, stuck: aiStuck, retry: retryAiExplanation } = useAIExplanation(props.analysisId);
+const {
+  aiStatus,
+  aiExplanation,
+  error: aiError,
+  stuck: aiStuck,
+  retry: retryAiExplanation,
+} = useAIExplanation(props.analysisId);
 
 type TabKey = 'path' | 'sourceIp' | 'status' | 'method' | 'userAgent' | 'time';
 
@@ -255,6 +263,7 @@ const drawerTitle = computed(() => {
         :stuck="aiStuck"
         @retry="retryAiExplanation"
       />
+      <EntitlementRequiredNotice v-if="aiError instanceof ApiError && aiError.code === 'ENTITLEMENT_REQUIRED'" />
       <template v-if="aiStatus === 'success' && aiExplanation">
         <OverallUrgencyCard :urgency="aiExplanation.overallUrgency" @navigate-reference="onNavigateReference" />
         <AISummary :summary="aiExplanation.summary" />
