@@ -2,6 +2,7 @@ import { PrismaAIExplanationRepository, PrismaAnalysisRepository, PrismaObservat
 import { recoverAiExplanationEnqueue } from '@polaris/queue';
 import type { FastifyInstance } from 'fastify';
 import { requireOwnedAnalysis } from '../auth/require-owned-analysis.js';
+import { requireEntitlement } from '../billing/require-entitlement.js';
 import type { ApiDeps } from '../deps.js';
 import { toAIExplanationDetailDto } from '../dto/ai-explanation.js';
 import { sendApiError } from '../errors.js';
@@ -35,6 +36,14 @@ export function registerAiExplanationRoutes(app: FastifyInstance, deps: ApiDeps)
 
     const analysis = await requireOwnedAnalysis(deps, req, reply, analysisId);
     if (analysis === undefined) return;
+
+    // Entitlement is an authorization-tier gate like Ownership, not a
+    // business-state check (57_Development_Setup_and_Eighth_Sprint.md plan
+    // decision 7) — a Free caller gets a consistent 403 regardless of the
+    // Analysis's lifecycle stage, never leaking business-state info (e.g.
+    // whether an AIExplanationRecord already exists) to a caller who has no
+    // right to retry regardless. Ownership (404) has already run above.
+    if ((await requireEntitlement(deps, req, reply, 'aiExplanationRetry')) === undefined) return;
 
     const observationSetRecord = await new PrismaObservationSetRepository(deps.prisma).findByAnalysisId(analysisId);
     const analyzerReady = analysis.analyzerStatus === 'success' || analysis.analyzerStatus === 'partial';

@@ -1,10 +1,28 @@
-import { PrismaAIExplanationRepository, PrismaAccountRepository, PrismaAnalysisRepository, PrismaProjectRepository, persistAiExplanationFailure } from '@polaris/db';
+import { PrismaAIExplanationRepository, PrismaAccountRepository, PrismaAnalysisRepository, PrismaProjectRepository, persistAiExplanationFailure, prisma } from '@polaris/db';
 import { AI_EXPLANATION_QUEUE, buildAiExplanationJobId, createWorkerConnection } from '@polaris/queue';
 import type { FastifyInstance } from 'fastify';
 import { Worker } from 'bullmq';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../server.js';
 import { buildApiDeps, createAnalysisReadyForAiExplanation, resetDatabase } from './api-test-helpers.js';
+
+/**
+ * The SOLE mechanism for granting Pro in any test in this suite (M-01,
+ * `58_Sprint_8_Plan_Review.md`) — a direct Prisma write to the Subscription
+ * table, mirroring `apps/api/src/__tests__/billing.test.ts`'s own local
+ * helper of the same name and shape.
+ */
+async function createTestSubscription(accountId: string, status: string): Promise<void> {
+  await prisma.subscription.create({
+    data: {
+      accountId,
+      provider: 'stripe',
+      providerSubscriptionId: `test-sub-${accountId}-${Date.now()}-${Math.random()}`,
+      status,
+      cancelAtPeriodEnd: false,
+    },
+  });
+}
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:16379';
 const AUTH = { authorization: 'Bearer test-account' };
@@ -100,6 +118,50 @@ describe('ai-explanation routes', () => {
       expect(response.json()).toEqual({ error: { code: 'ANALYSIS_NOT_FOUND', message: expect.any(String) } });
     });
 
+    it('T-BILL-06: returns 403 ENTITLEMENT_REQUIRED for a Free Account, even though every other precondition is met', async () => {
+      const { analysisId } = await createAnalysisReadyForAiExplanation(deps);
+      const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry`, headers: AUTH });
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toEqual({ error: { code: 'ENTITLEMENT_REQUIRED', message: expect.any(String) } });
+
+      // The Entitlement gate runs BEFORE the OBSERVATION_SET_NOT_READY/
+      // AI_EXPLANATION_ALREADY_EXISTS business-state checks (plan decision
+      // 7) — nothing was enqueued and the DB was never touched.
+      const analysis = await new PrismaAnalysisRepository(deps.prisma).findById(analysisId);
+      expect(analysis?.aiStatus).toBe('not_requested');
+      const job = await deps.aiExplanationQueue.getJob(buildAiExplanationJobId(analysisId));
+      expect(job).toBeUndefined();
+    });
+
+    it('T-BILL-07: a Pro Account retains the existing retry behavior unchanged', async () => {
+      const { analysisId, accountId } = await createAnalysisReadyForAiExplanation(deps);
+      await createTestSubscription(accountId, 'active');
+
+      const response = await app.inject({ method: 'POST', url: `/analyses/${analysisId}/explanation/retry`, headers: AUTH });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ status: 'enqueued' });
+
+      const analysis = await new PrismaAnalysisRepository(deps.prisma).findById(analysisId);
+      expect(analysis?.aiStatus).toBe('queued');
+    });
+
+    it('T-BILL-08: retrying another Account\'s Analysis 404s — Ownership is checked before Entitlement, never leaking to 403', async () => {
+      // Account B (the caller) is Free, Account A (the owner) is Pro — if
+      // Entitlement were checked before Ownership, a Free caller retrying a
+      // Pro-owned Analysis it doesn't own could observe a 403 instead of a
+      // 404, leaking that the resource exists.
+      const { analysisId, accountId } = await createAnalysisReadyForAiExplanation(deps, 'account-a');
+      await createTestSubscription(accountId, 'active');
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/analyses/${analysisId}/explanation/retry`,
+        headers: { authorization: 'Bearer account-b' },
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toEqual({ error: { code: 'ANALYSIS_NOT_FOUND', message: expect.any(String) } });
+    });
+
     it('returns 409 OBSERVATION_SET_NOT_READY before the Analyzer has produced an ObservationSet', async () => {
       const account = await new PrismaAccountRepository(deps.prisma).getOrCreateByAuthSubject({
         authProvider: 'clerk',
@@ -112,6 +174,7 @@ describe('ai-explanation routes', () => {
         ownerAccountId: account.id,
       });
       const analysis = await new PrismaAnalysisRepository(deps.prisma).create({ projectId: project.id });
+      await createTestSubscription(account.id, 'active');
 
       const response = await app.inject({ method: 'POST', url: `/analyses/${analysis.id}/explanation/retry`, headers: AUTH });
       expect(response.statusCode).toBe(409);
@@ -119,7 +182,8 @@ describe('ai-explanation routes', () => {
     });
 
     it('returns 409 AI_EXPLANATION_ALREADY_EXISTS when a record already exists — Sprint 6 never regenerates a success', async () => {
-      const { analysisId } = await createAnalysisReadyForAiExplanation(deps);
+      const { analysisId, accountId } = await createAnalysisReadyForAiExplanation(deps);
+      await createTestSubscription(accountId, 'active');
       await new PrismaAIExplanationRepository(deps.prisma).create({
         analysisId,
         schemaVersion: '1.0.0',
@@ -139,7 +203,8 @@ describe('ai-explanation routes', () => {
       // scheduleInitialAiExplanation, so this is naturally the exact stuck
       // state M-01 describes: the initial AI enqueue never happened at all
       // (e.g. a Redis outage at the moment persistAnalyzerSuccess committed).
-      const { analysisId } = await createAnalysisReadyForAiExplanation(deps);
+      const { analysisId, accountId } = await createAnalysisReadyForAiExplanation(deps);
+      await createTestSubscription(accountId, 'active');
       const analysisRepository = new PrismaAnalysisRepository(deps.prisma);
       const before = await analysisRepository.findById(analysisId);
       expect(before?.status).toBe('analyzer_result_ready');
@@ -161,7 +226,8 @@ describe('ai-explanation routes', () => {
     });
 
     it('T-AI-03 (API half): a terminal AI failure with no Queue job enqueues a fresh job and reconciles aiStatus to queued, leaving status at completed', async () => {
-      const { analysisId } = await createAnalysisReadyForAiExplanation(deps);
+      const { analysisId, accountId } = await createAnalysisReadyForAiExplanation(deps);
+      await createTestSubscription(accountId, 'active');
       const analysisRepository = new PrismaAnalysisRepository(deps.prisma);
       // A terminal AI failure always leaves Analysis.status at 'completed'
       // (never 'failed', §8/§93) — reached via the real persist function,
@@ -182,7 +248,8 @@ describe('ai-explanation routes', () => {
     });
 
     it('T-AI-06 (API half, F-05): reconciles aiStatus to queued even when the Queue already had a waiting job the DB never learned about', async () => {
-      const { analysisId } = await createAnalysisReadyForAiExplanation(deps);
+      const { analysisId, accountId } = await createAnalysisReadyForAiExplanation(deps);
+      await createTestSubscription(accountId, 'active');
       const analysisRepository = new PrismaAnalysisRepository(deps.prisma);
       await analysisRepository.updateStatus(analysisId, 'completed', { aiStatus: 'failed' });
 
@@ -201,7 +268,8 @@ describe('ai-explanation routes', () => {
     });
 
     it('reports already_running and writes nothing to the DB when the Worker already has the job active', async () => {
-      const { analysisId } = await createAnalysisReadyForAiExplanation(deps);
+      const { analysisId, accountId } = await createAnalysisReadyForAiExplanation(deps);
+      await createTestSubscription(accountId, 'active');
       const analysisRepository = new PrismaAnalysisRepository(deps.prisma);
       await analysisRepository.updateStatus(analysisId, 'explaining', { aiStatus: 'running' });
 
