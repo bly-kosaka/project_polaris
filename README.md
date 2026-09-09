@@ -2,7 +2,7 @@
 
 アクセスログを、人とAIが確認できる構造化された観測情報へ変換するプロダクト。
 
-設計書は [`md/`](md/) 配下にある。実装はまず `md/26_Development_Setup_and_First_Sprint.md` の Sprint 1（リポジトリ基盤 + Analyzer Parser / Normalizer）から開始している。認証（Clerk）はSprint 7で実装済み。課金はまだ実装していない。
+設計書は [`md/`](md/) 配下にある。実装はまず `md/26_Development_Setup_and_First_Sprint.md` の Sprint 1（リポジトリ基盤 + Analyzer Parser / Normalizer）から開始している。認証（Clerk）はSprint 7で実装済み。課金（Stripe、Free/Pro Plan）はSprint 8で実装済み。
 
 ---
 
@@ -26,9 +26,11 @@ yarn install
 cp .env.example .env
 ```
 
-`DATABASE_URL` / `REDIS_URL` / `S3_*` / `APP_BASE_URL` は必須（`packages/shared` の Zod スキーマが起動時に検証し、不足時は Fail Fast する）。`MAX_UPLOAD_BYTES`（既定 50MB）/ `RAW_LOG_RETENTION_HOURS`（既定 24時間）/ `AI_MAX_OUTPUT_TOKENS`（既定 4096）/ `AI_MAX_INPUT_BYTES`（既定 200000 byte）はベンチマーク前の仮値で、いずれもConfig化されており無制限にはならない。`AI_PROVIDER`は既定`openai`（Sprint 6時点で対応するのはOpenAIのみ）。`OPENAI_MODEL`は実際にAI Explanationを動かす場合のみ必須（未設定でもCIは通る — 後述のFake AI Providerのみを使うため）。`OPENAI_API_KEY` / `OPENAI_REASONING_EFFORT` / `STRIPE_*` は任意。
+`DATABASE_URL` / `REDIS_URL` / `S3_*` / `APP_BASE_URL` は必須（`packages/shared` の Zod スキーマが起動時に検証し、不足時は Fail Fast する）。`MAX_UPLOAD_BYTES`（既定 50MB）/ `RAW_LOG_RETENTION_HOURS`（既定 24時間）/ `AI_MAX_OUTPUT_TOKENS`（既定 4096）/ `AI_MAX_INPUT_BYTES`（既定 200000 byte）はベンチマーク前の仮値で、いずれもConfig化されており無制限にはならない。`AI_PROVIDER`は既定`openai`（Sprint 6時点で対応するのはOpenAIのみ）。`OPENAI_MODEL`は実際にAI Explanationを動かす場合のみ必須（未設定でもCIは通る — 後述のFake AI Providerのみを使うため）。`OPENAI_API_KEY` / `OPENAI_REASONING_EFFORT` は任意。
 
 `CLERK_SECRET_KEY` / `CLERK_PUBLISHABLE_KEY` はZodスキーマ上は任意だが、`apps/api`は起動時（`main()`実行時のみ、Type CheckやTest実行時は無関係）に`CLERK_SECRET_KEY`が未設定だと明示的にFail Fastする — 実際にAPIを起動する場合は必須。CIはFake Auth Adapterのみを使うため、この2つを設定しなくてもCIは通る。`apps/web`側は別途 `apps/web/.env` の `VITE_CLERK_PUBLISHABLE_KEY` が必要（後述）。
+
+`STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRO_PRICE_ID` も同様にZodスキーマ上は任意だが、`apps/api`の起動時（`main()`実行時のみ）にこの3つのいずれかが未設定だと明示的にFail Fastする — 実際にAPIを起動しStripe連携を動かす場合は必須。CIは`apps/api`の`index.ts`（`main()`）を一切起動せず、Backend/Frontend TestとProduct Integration TestはすべてFake Billing Gateway（`Subscription` Tableへの直接書き込みでのみProを付与する）を使うため、この3つを設定しなくてもCIは通る。
 
 `.env` はコミットしない。Secret Value を `.env.example` へ書かない。
 
@@ -114,6 +116,15 @@ POST /analyses/:analysisId/explanation/retry  AI Explanationの再試行（失�
 ```
 
 Sprint 7で全Route（上記すべて）にAuthentication + Ownershipを追加した。全Requestに`Authorization: Bearer <Clerk Session Token>`が必須（欠落/不正時は401 `AUTHENTICATION_REQUIRED` / `AUTHENTICATION_INVALID`、Clerk側の一時的な障害時は503 `AUTHENTICATION_UNAVAILABLE` — 401とは意図的に区別し、有効なSessionを持つUserを誤ってSign Inへ差し戻さないようにしている）。Email未確認時は403 `EMAIL_VERIFICATION_REQUIRED`。他Accountが所有するProject/Analysisへのアクセスは404（`PROJECT_NOT_FOUND` / `ANALYSIS_NOT_FOUND`）を返す — 403は使わない（存在の有無を推測されないため）。
+
+Sprint 8でBillingのEndpointを追加した。`POST /analyses/:analysisId/explanation/retry`はOwnership Check成功後・既存の業務State Checkより前にEntitlement Check（Pro専用）が入る — Free Accountは常に403 `ENTITLEMENT_REQUIRED`を返す。
+
+```text
+GET  /billing                             現在のPlan / Subscription状態 / 利用可能Featureを取得
+POST /billing/checkout                    Stripe Checkout Sessionを作成しURLを返す（既にPro時は409 ALREADY_PRO）
+POST /billing/portal                      Stripe Billing Portal Sessionを作成しURLを返す（BillingCustomer未作成時は409 BILLING_CUSTOMER_NOT_FOUND）
+POST /webhooks/stripe                     Stripe Webhook受信（Public Scope — Clerk認証を通さず、Stripe Signatureのみで検証する）
+```
 
 ### Web (Vue) をローカルで動かす
 
@@ -228,3 +239,13 @@ polaris/
 運用上の注意：Clerk Dashboardでカスタム Session Token Templateを設定していない場合、`ClerkAuthAdapter`は毎Requestごとに`users.getUser()`を1回追加で呼ぶ（Email/Email確認状態がSession Claimに含まれないため）。これはMVPとして許容している設計上のTrade-off（Latency増加、Clerk Backend APIのRate Limit・可用性への結合）であり、将来的にはCustom Session Claimまたは短命Cacheでの改善余地がある。
 
 含まない（意図的にスコープ外）：Billing/Entitlement（別Sprint）、Webhook同期（`Account`のProfile更新は各Requestでの Best-effort Refreshのみ）、Organization/Team機能、Social Login個別設定、Production Deploy。
+
+### Sprint 8 のスコープ
+
+`md/57_Development_Setup_and_Eighth_Sprint.md` に対応する。中心原則：「Stripeが支払い状態を決め、PolarisがEntitlementを決める。Analyzerは変わらない」。
+
+含む：`packages/domain`への純粋なEntitlement型/Resolver追加（`resolveEntitlement()` — I/O一切なし、Subscription Statusから`plan`/`features`/`billing`を導出する純関数）、`BillingCustomer` / `Subscription` / `BillingWebhookEvent` / `UsageEvent`の4Prisma Model（`Account`自体にはStripe関連Columnを一切追加しない）、`apps/api/src/billing/`（Stripe SDKを直接扱うのはこの下の`StripeGateway`のみ — `BillingGateway` Interfaceで抽象化、Checkout/Portal Session発行、`ensure-billing-customer.ts`による並行初回Checkout Raceの安全な処理）、`GET /billing` / `POST /billing/checkout` / `POST /billing/portal`、Public Scope（Clerk認証を通さない）の`POST /webhooks/stripe`（Signature検証 → Event種別Filter → Stripeへの正規状態再取得 → `BillingWebhookEvent`の`providerEventId`一意制約によるIdempotent処理、Webhook Payload自体の値は一切信用せずAccount特定は必ず正規再取得した`stripeCustomerId`から行う）、`POST /analyses/:analysisId/explanation/retry`へのEntitlement Gate（Ownership Check成功の直後・既存の業務State Checkより前に実行 — Free Userには常に一貫した403を返し、業務Stateを漏らさない）、`UsageEvent`記録（`persistAnalyzerSuccess`と同一Transaction内、`analysisId`一意制約でIdempotent、Quota強制は未実装）、`apps/web`のBilling画面（Plan/Status/更新日表示、Upgrade/Manage Billing Button、`?checkout=success`は再取得のトリガーのみでPro確定の根拠にはしない）と`AnalysisResultPage`のEntitlement Required通知、`apps/product-e2e`へのFree→Retry Blocked→Upgrade→Pro→Retry Allowedの一連Flow検証。
+
+最重要不変条件：Analyzerの出力はFree/Proで完全に同一（`packages/analyzer`は不可侵）。Ownership（404）は常にEntitlement（403）より先に判定する — 非所有Resourceへの403は存在の有無を漏らすため使わない。Checkoutの`success_url`到達だけではProを確定させない（Webhookが書き込んだ`Subscription` Snapshotのみが根拠）。Subscription StatusからPlanへのMappingはFail Closed（`active` / `trialing` / `past_due`のみPro、それ以外— 将来の未知のStatusも含む — はFree）。Webhookは順序非依存かつIdempotent（Payload自体を信用せずStripeへ正規再取得する）。テストでProを付与する手段は`Subscription` Tableへの直接書き込みのみ（`FakeBillingGateway`内部StateはEntitlement判定に一切関与しない）。CIは実Stripe呼び出しを一切行わない（`apps/api`の`index.ts`はCIのどのStepからも起動されないため`STRIPE_*`はCIで未設定のままでよい）。
+
+含まない（意図的にスコープ外）：Usage Quota強制（`UsageEvent`は記録のみ）、Free/Pro以外のPlan、AI Chat機能、複数Billing Provider対応、Production Deploy／実Stripe Test-Mode Smoke Test（Stripe Test-Mode Keyが必要なため手動実施 — 未実施）。
