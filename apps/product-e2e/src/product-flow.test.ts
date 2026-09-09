@@ -45,6 +45,55 @@ class FakeAuthAdapter implements AuthAdapter {
   }
 }
 
+interface ProviderSubscriptionSnapshotLike {
+  providerSubscriptionId: string;
+  stripeCustomerId: string;
+  providerPriceId?: string;
+  status: string;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd?: string;
+  providerUpdatedAt?: string;
+}
+
+/**
+ * Same shape as `apps/api/src/__tests__/fake-billing-gateway.ts` — not
+ * imported directly since `@polaris/api`'s `exports` only publishes `.`,
+ * `./server`, `./deps` (test-only helpers are deliberately not part of the
+ * package's public surface). Structurally satisfies `ApiDeps.billingGateway`
+ * without needing to import the `BillingGateway` interface itself. Never a
+ * shortcut to Product Entitlement (M-01) — Pro is granted, in this file,
+ * exclusively via a direct `prisma.subscription.create(...)` matching
+ * `createTestSubscription`'s shape.
+ */
+class FakeBillingGateway {
+  private readonly customers = new Map<string, string>();
+
+  async createCustomer(accountId: string): Promise<{ stripeCustomerId: string }> {
+    let stripeCustomerId = this.customers.get(accountId);
+    if (stripeCustomerId === undefined) {
+      stripeCustomerId = `fake-cus-${accountId}`;
+      this.customers.set(accountId, stripeCustomerId);
+    }
+    return { stripeCustomerId };
+  }
+
+  async createCheckoutSession(): Promise<{ url: string }> {
+    return { url: 'https://fake-checkout.test/session' };
+  }
+
+  async createPortalSession(): Promise<{ url: string }> {
+    return { url: 'https://fake-portal.test/session' };
+  }
+
+  verifyWebhookSignature(): never {
+    throw new Error('FakeBillingGateway: webhook signature verification is not exercised in Product E2E');
+  }
+
+  async getSubscription(): Promise<ProviderSubscriptionSnapshotLike> {
+    throw new Error('FakeBillingGateway: getSubscription is not exercised in Product E2E');
+  }
+}
+
 /**
  * Mirrors `apps/web/src/__tests__/App.test.ts`'s mocking approach —
  * `useAuth()`/`useUser()` are the only `@clerk/vue` composables `App.vue`/
@@ -164,11 +213,13 @@ beforeAll(async () => {
     analyzerQueue,
     aiExplanationQueue,
     authAdapter: new FakeAuthAdapter(),
+    billingGateway: new FakeBillingGateway(),
     maxUploadBytes: 52428800,
     rawLogRetentionHours: 24,
     // Must match vitest.config.ts's `environmentOptions.happyDOM.url` — the
     // mounted app's page origin, which real @fastify/cors checks against.
     corsOrigin: 'http://localhost:5173',
+    appBaseUrl: 'http://localhost:5173',
   };
   apiServer = await buildServer(apiDeps);
   await apiServer.listen({ port: API_PORT, host: '127.0.0.1' });

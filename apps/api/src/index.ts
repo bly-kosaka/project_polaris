@@ -4,6 +4,7 @@ import { prisma } from '@polaris/db';
 import { createAiExplanationQueue, createAnalyzerQueue, createProducerConnection } from '@polaris/queue';
 import { loadEnv } from '@polaris/shared';
 import { ensureBucket, S3TemporaryObjectStorage } from '@polaris/storage';
+import { StripeGateway } from './billing/stripe-gateway.js';
 import type { ApiDeps } from './deps.js';
 import { buildServer } from './server.js';
 
@@ -15,6 +16,15 @@ async function main(): Promise<void> {
   // pattern OPENAI_MODEL already established (50_Development_Setup_and_Seventh_Sprint.md decision 6).
   if (env.CLERK_SECRET_KEY === undefined) {
     throw new Error('CLERK_SECRET_KEY is required to start apps/api');
+  }
+  if (env.STRIPE_SECRET_KEY === undefined) {
+    throw new Error('STRIPE_SECRET_KEY is required to start apps/api');
+  }
+  if (env.STRIPE_WEBHOOK_SECRET === undefined) {
+    throw new Error('STRIPE_WEBHOOK_SECRET is required to start apps/api');
+  }
+  if (env.STRIPE_PRO_PRICE_ID === undefined) {
+    throw new Error('STRIPE_PRO_PRICE_ID is required to start apps/api');
   }
 
   const s3Client = new S3Client({
@@ -35,15 +45,23 @@ async function main(): Promise<void> {
     authorizedParties: [env.CORS_ORIGIN],
   });
 
+  const billingGateway = new StripeGateway({
+    secretKey: env.STRIPE_SECRET_KEY,
+    webhookSecret: env.STRIPE_WEBHOOK_SECRET,
+    proPriceId: env.STRIPE_PRO_PRICE_ID,
+  });
+
   const deps: ApiDeps = {
     prisma,
     storage: new S3TemporaryObjectStorage(s3Client, env.S3_BUCKET),
     analyzerQueue: createAnalyzerQueue(connection),
     aiExplanationQueue: createAiExplanationQueue(connection),
     authAdapter,
+    billingGateway,
     maxUploadBytes: env.MAX_UPLOAD_BYTES,
     rawLogRetentionHours: env.RAW_LOG_RETENTION_HOURS,
     corsOrigin: env.CORS_ORIGIN,
+    appBaseUrl: env.APP_BASE_URL,
   };
 
   const app = await buildServer(deps);

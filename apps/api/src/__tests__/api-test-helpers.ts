@@ -7,8 +7,10 @@ import { analyzeAccessLog } from '@polaris/analyzer';
 import { PrismaAccountRepository, PrismaAnalysisRepository, PrismaProjectRepository, persistAnalyzerSuccess, prisma } from '@polaris/db';
 import { createAiExplanationQueue, createAnalyzerQueue, createProducerConnection } from '@polaris/queue';
 import { ensureBucket, S3TemporaryObjectStorage } from '@polaris/storage';
+import type { BillingGateway } from '../billing/billing-gateway.js';
 import type { ApiDeps } from '../deps.js';
 import { FakeAuthAdapter } from './fake-auth-adapter.js';
+import { FakeBillingGateway } from './fake-billing-gateway.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -35,7 +37,7 @@ export function readFixture(name: string): string {
 
 export async function buildApiDeps(
   maxUploadBytes = 52428800,
-  options: { authAdapter?: AuthAdapter } = {},
+  options: { authAdapter?: AuthAdapter; billingGateway?: BillingGateway } = {},
 ): Promise<ApiDeps & { close: () => Promise<void> }> {
   const s3Client = new S3Client({
     endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
@@ -61,9 +63,11 @@ export async function buildApiDeps(
     analyzerQueue,
     aiExplanationQueue,
     authAdapter: options.authAdapter ?? new FakeAuthAdapter(),
+    billingGateway: options.billingGateway ?? new FakeBillingGateway(),
     maxUploadBytes,
     rawLogRetentionHours: 24,
     corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
+    appBaseUrl: process.env.APP_BASE_URL ?? 'http://localhost:5173',
     close: async () => {
       await analyzerQueue.close();
       await aiExplanationQueue.close();
@@ -90,6 +94,7 @@ export async function createAnalysisReadyForAiExplanation(
   ownerToken = 'test-account',
 ): Promise<{
   analysisId: string;
+  accountId: string;
 }> {
   // The owning Account is provisioned through the exact same FakeAuthAdapter
   // identity-function convention the routes themselves use — an
@@ -121,7 +126,7 @@ export async function createAnalysisReadyForAiExplanation(
     observationSet: result.observationSet,
   });
 
-  return { analysisId: analysis.id };
+  return { analysisId: analysis.id, accountId: account.id };
 }
 
 /**
