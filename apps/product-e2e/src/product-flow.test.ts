@@ -5,7 +5,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { flushPromises, mount } from '@vue/test-utils';
 import { ref } from 'vue';
 import { S3Client } from '@aws-sdk/client-s3';
-import { prisma } from '@polaris/db';
+import { PrismaAccountRepository, PrismaAnalysisRepository, PrismaProjectRepository, persistAiExplanationFailure, persistAnalyzerSuccess, prisma } from '@polaris/db';
+import { analyzeAccessLog } from '@polaris/analyzer';
 import {
   AI_EXPLANATION_QUEUE,
   ANALYZER_QUEUE,
@@ -274,6 +275,49 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+async function* linesFrom(rawLines: string[]): AsyncGenerator<string> {
+  for (const line of rawLines) yield line;
+}
+
+/**
+ * Builds a real, fully-persisted Analysis (Account/Project/Analysis/
+ * ObservationSet, via the same repository/persist functions the real API/
+ * Worker use) with a terminal AI failure already in place — the exact
+ * precondition the "re-試行" button on the Result page needs to appear,
+ * without re-running the (already covered, above) Upload UI flow just to
+ * reach it.
+ */
+async function createOwnedAnalysisWithFailedAiExplanation(authSubject: string): Promise<{ analysisId: string; accountId: string }> {
+  const account = await new PrismaAccountRepository(prisma).getOrCreateByAuthSubject({
+    authProvider: 'clerk',
+    authSubject,
+    email: `${authSubject}@example.com`,
+    emailVerified: true,
+  });
+  const project = await new PrismaProjectRepository(prisma).create({
+    name: `Billing Flow Project ${Date.now()}`,
+    ownerAccountId: account.id,
+  });
+  const analysisRepository = new PrismaAnalysisRepository(prisma);
+  const analysis = await analysisRepository.create({ projectId: project.id });
+  await analysisRepository.updateStatus(analysis.id, 'uploaded');
+  await analysisRepository.updateStatus(analysis.id, 'analyzing');
+
+  const rawLines = validLog.split('\n').filter((line) => line.length > 0);
+  const result = await analyzeAccessLog(linesFrom(rawLines));
+  if (result.analyzerStatus === 'failed') {
+    throw new Error(`createOwnedAnalysisWithFailedAiExplanation: analyzer returned failed (${result.errorCode})`);
+  }
+  await persistAnalyzerSuccess(prisma, {
+    analysisId: analysis.id,
+    analyzerStatus: result.analyzerStatus,
+    observationSet: result.observationSet,
+  });
+  await persistAiExplanationFailure(prisma, { analysisId: analysis.id });
+
+  return { analysisId: analysis.id, accountId: account.id };
+}
+
 describe('Product flow', () => {
   beforeEach(() => {
     mockToken.value = 'account-a';
@@ -367,5 +411,94 @@ describe('Product flow', () => {
     expect(wrapper.text()).not.toContain('Account A Only Project');
 
     wrapper.unmount();
+  });
+
+  it('Sprint 8: Free -> Retry blocked -> Upgrade (Fake Subscription active) -> Pro -> Retry allowed', async () => {
+    const { analysisId } = await createOwnedAnalysisWithFailedAiExplanation('billing-flow-account');
+    mockToken.value = 'billing-flow-account';
+
+    await router.push(`/analyses/${analysisId}`);
+    await router.isReady();
+    const wrapper = mount(App, { global: { plugins: [router] } });
+    await flushPromises();
+
+    // --- Free: Retry is blocked with the Entitlement Required notice ---
+    await vi.waitFor(() => expect(wrapper.find('.ai-status-panel__retry').exists()).toBe(true), { timeout: 10000 });
+    await wrapper.find('.ai-status-panel__retry').trigger('click');
+    await flushPromises();
+    await vi.waitFor(() => expect(wrapper.find('.entitlement-required-notice').exists()).toBe(true), { timeout: 10000 });
+
+    // --- Upgrade CTA navigates to Billing, which shows Free + an Upgrade button ---
+    const upgradeLink = wrapper.find('.entitlement-required-notice__link');
+    await upgradeLink.trigger('click');
+    await flushPromises();
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('billing'), { timeout: 10000 });
+    // The Upgrade button's presence is the actual current-plan signal — the
+    // page's two plan-comparison cards always render both "Free" and "Pro"
+    // as static copy regardless of the caller's real entitlement.
+    await vi.waitFor(() => expect(wrapper.find('.billing-page__upgrade').exists()).toBe(true), { timeout: 10000 });
+
+    // --- "Fake Subscription active" (M-01): Pro is granted the same way
+    // every other test in this repo grants it — a direct Subscription row
+    // write, never through FakeBillingGateway/Checkout ---
+    const account = await new PrismaAccountRepository(prisma).getOrCreateByAuthSubject({
+      authProvider: 'clerk',
+      authSubject: 'billing-flow-account',
+      email: 'billing-flow-account@example.com',
+      emailVerified: true,
+    });
+    await prisma.subscription.create({
+      data: {
+        accountId: account.id,
+        provider: 'stripe',
+        providerSubscriptionId: `fake-sub-${account.id}`,
+        status: 'active',
+        cancelAtPeriodEnd: false,
+      },
+    });
+
+    // --- Billing refresh reflects Pro (no Checkout ever ran, so no
+    // BillingCustomer exists — canManageBilling stays false; the Upgrade
+    // button disappearing is what proves the refetch actually saw Pro) ---
+    await wrapper.find('.billing-page__refresh').trigger('click');
+    await flushPromises();
+    await vi.waitFor(() => expect(wrapper.find('.billing-page__upgrade').exists()).toBe(false), { timeout: 10000 });
+
+    // --- Retry allowed: back on the Result page, Retry now succeeds and
+    // the real AI Worker (Fake Provider) produces a fresh AI Explanation ---
+    await router.push(`/analyses/${analysisId}`);
+    await flushPromises();
+    await vi.waitFor(() => expect(wrapper.find('.ai-status-panel__retry').exists()).toBe(true), { timeout: 10000 });
+    await wrapper.find('.ai-status-panel__retry').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('.entitlement-required-notice').exists()).toBe(false);
+    await vi.waitFor(() => expect(wrapper.text()).toContain('Product E2E Fake summary.'), { timeout: 30000 });
+
+    wrapper.unmount();
+  });
+
+  it('Sprint 8: retrying another Account\'s Analysis 404s, never leaking a 403 (Ownership before Entitlement)', async () => {
+    // Account A owns this Analysis and is Pro — if Entitlement were checked
+    // before Ownership, a Free Account B could distinguish "not mine" (404)
+    // from "not owned but Pro-only" (403) by response code alone.
+    const { analysisId, accountId } = await createOwnedAnalysisWithFailedAiExplanation('retry-ownership-account-a');
+    await prisma.subscription.create({
+      data: {
+        accountId,
+        provider: 'stripe',
+        providerSubscriptionId: `fake-sub-${accountId}`,
+        status: 'active',
+        cancelAtPeriodEnd: false,
+      },
+    });
+
+    const response = await fetch(`http://127.0.0.1:${API_PORT}/analyses/${analysisId}/explanation/retry`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer retry-ownership-account-b' },
+    });
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('ANALYSIS_NOT_FOUND');
   });
 });
