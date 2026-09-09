@@ -29,6 +29,7 @@ export type ApiErrorCode =
   | 'ALREADY_PRO'
   | 'BILLING_CUSTOMER_NOT_FOUND'
   | 'WEBHOOK_SIGNATURE_INVALID'
+  | 'WEBHOOK_UPSTREAM_UNAVAILABLE'
   | 'INTERNAL_ERROR';
 
 export function sendApiError(reply: FastifyReply, status: number, code: ApiErrorCode, message: string) {

@@ -8,7 +8,9 @@ import type { ApiDeps } from './deps.js';
 import { sendApiError } from './errors.js';
 import { registerAiExplanationRoutes } from './routes/ai-explanation.js';
 import { registerAnalysesRoutes } from './routes/analyses.js';
+import { registerBillingRoutes } from './routes/billing.js';
 import { registerProjectsRoutes } from './routes/projects.js';
+import { registerStripeWebhookRoute } from './routes/stripe-webhook.js';
 
 /**
  * Separated from index.ts's process bootstrap so tests can build a server
@@ -49,13 +51,22 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     return sendApiError(reply, 500, 'INTERNAL_ERROR', 'An internal error occurred');
   });
 
-  // Public Scope (57_Development_Setup_and_Eighth_Sprint.md §21) — routes
-  // that must never go through Clerk Authentication (currently just the
-  // Stripe Webhook, added in a later step). Fastify Encapsulation means the
-  // Protected Scope's hooks below are structurally invisible here — never
-  // an `if (path === '/webhooks/stripe')` branch inside authenticate.ts.
-  await app.register(async (_publicScope) => {
-    // Routes registered here in a later step.
+  // Public Scope (57_Development_Setup_and_Eighth_Sprint.md §21) — the
+  // Stripe Webhook, the only route that must never go through Clerk
+  // Authentication. Fastify Encapsulation means the Protected Scope's
+  // hooks below are structurally invisible here — never an
+  // `if (path === '/webhooks/stripe')` branch inside authenticate.ts.
+  await app.register(async (publicScope) => {
+    // Stripe Signature Verification (§22) must run against the exact raw
+    // bytes Stripe signed — never JSON.parse'd and re-stringified first,
+    // which could change the byte sequence. Scoped to this child context
+    // only (Fastify's own docs confirm addContentTypeParser is
+    // encapsulated per-scope), so every other route's normal JSON body
+    // parsing is unaffected.
+    publicScope.addContentTypeParser('application/json', { parseAs: 'buffer' }, (_req, body, done) => {
+      done(null, body);
+    });
+    registerStripeWebhookRoute(publicScope, deps);
   });
 
   // Protected Scope — every existing Product Resource route registrar,
@@ -72,6 +83,7 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
     registerProjectsRoutes(protectedScope, deps);
     registerAnalysesRoutes(protectedScope, deps);
     registerAiExplanationRoutes(protectedScope, deps);
+    registerBillingRoutes(protectedScope, deps);
   });
 
   return app;
