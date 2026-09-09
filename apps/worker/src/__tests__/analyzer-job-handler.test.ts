@@ -47,6 +47,10 @@ describe('handleAnalyzerJob', () => {
     );
     expect(execution?.status).toBe('success');
     expect(execution?.attempt).toBe(1);
+
+    const usageEvents = await deps.prisma.usageEvent.findMany({ where: { analysisId } });
+    expect(usageEvents).toHaveLength(1);
+    expect(usageEvents[0]?.metric).toBe('analysis_completed');
   });
 
   it('partial path: still creates an ObservationSet, Analysis reaches analyzer_result_ready with analyzerStatus=partial', async () => {
@@ -83,6 +87,10 @@ describe('handleAnalyzerJob', () => {
     );
     expect(execution?.status).toBe('failed');
     expect(execution?.errorCode).toBe('PARSER_NO_VALID_LINES');
+
+    // T-USAGE-03: a Fatal Analyzer result never records Usage.
+    const usageEvents = await deps.prisma.usageEvent.findMany({ where: { analysisId } });
+    expect(usageEvents).toHaveLength(0);
   });
 
   it('T-03: idempotent replay after a successful persist does not re-run the Analyzer or re-persist', async () => {
@@ -104,6 +112,12 @@ describe('handleAnalyzerJob', () => {
     const observationSetRepository = new PrismaObservationSetRepository(deps.prisma);
     const observationSet = await observationSetRepository.findByAnalysisId(analysisId);
     expect(observationSet).not.toBeNull();
+
+    // T-USAGE-02: the Worker's own crash-retry/duplicate-delivery path
+    // never re-runs persistAnalyzerSuccess (proven above via unchanged
+    // AnalysisExecution.attempt), so UsageEvent must still be exactly 1.
+    const usageEvents = await deps.prisma.usageEvent.findMany({ where: { analysisId } });
+    expect(usageEvents).toHaveLength(1);
   });
 
   it('T-02/T-15: a CAS loser on its first activation is a no-op, not a retry', async () => {

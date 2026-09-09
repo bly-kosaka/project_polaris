@@ -4,6 +4,7 @@ import type { PrismaClient } from './generated/prisma/client.js';
 import { PrismaAnalysisRepository } from './analysis/prisma-analysis-repository.js';
 import { PrismaObservationSetRepository } from './observation-set/prisma-observation-set-repository.js';
 import type { ObservationSetRecord } from './observation-set/types.js';
+import { PrismaUsageEventRepository } from './usage-event/prisma-usage-event-repository.js';
 
 /**
  * Two separate functions, not one branched function — keeps
@@ -32,6 +33,26 @@ export async function persistAnalyzerSuccess(
       analyzerStatus: params.analyzerStatus,
       ...(params.metadata !== undefined ? { metadata: params.metadata } : {}),
     });
+
+    // Usage Accounting (57_Development_Setup_and_Eighth_Sprint.md §38-41):
+    // resolved here, inside the SAME transaction as the ObservationSet
+    // write, from Analysis alone — the Worker never passes an accountId in,
+    // staying 100% Billing-unaware. No CONFLICT catch-and-ignore needed:
+    // the Worker's own Step-1 idempotency guard (checked before this
+    // function is ever called) already prevents a legitimate second call
+    // for the same analysisId, and ObservationSetRecord.analysisId @unique
+    // would throw on the write immediately above this one before a
+    // duplicate UsageEvent insert could ever be attempted.
+    const owner = await tx.analysis.findUniqueOrThrow({
+      where: { id: params.analysisId },
+      select: { project: { select: { ownerAccountId: true } } },
+    });
+    await new PrismaUsageEventRepository(tx).create({
+      accountId: owner.project.ownerAccountId,
+      analysisId: params.analysisId,
+      metric: 'analysis_completed',
+    });
+
     return { analysis, observationSetRecord };
   });
 }

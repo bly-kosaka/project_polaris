@@ -78,3 +78,15 @@ export type {
   AIExplanationRepository,
 } from './ai-explanation/index.js';
 export { toDomainAiExplanationRecord, PrismaAIExplanationRepository } from './ai-explanation/index.js';
+
+export type { CreateBillingCustomerInput, BillingCustomerRepository } from './billing-customer/index.js';
+export { toDomainBillingCustomer, PrismaBillingCustomerRepository } from './billing-customer/index.js';
+
+export type { UpsertSubscriptionInput, SubscriptionRepository } from './subscription/index.js';
+export { toDomainSubscription, PrismaSubscriptionRepository } from './subscription/index.js';
+
+export type { CreateBillingWebhookEventInput, BillingWebhookEventRepository } from './billing-webhook-event/index.js';
+export { PrismaBillingWebhookEventRepository } from './billing-webhook-event/index.js';
+
+export type { CreateUsageEventInput, UsageEventRepository } from './usage-event/index.js';
+export { toDomainUsageEvent, PrismaUsageEventRepository } from './usage-event/index.js';

@@ -21,38 +21,57 @@ export async function buildServer(deps: ApiDeps): Promise<FastifyInstance> {
   await app.register(cors, { origin: deps.corsOrigin }); // never '*' (39 §16)
   await app.register(multipart, { limits: { fileSize: deps.maxUploadBytes } });
 
-  // Both hooks are global and registered before every route registrar
-  // (50_Development_Setup_and_Seventh_Sprint.md decision 5) — every route
-  // in this app is a Protected Product Resource route; there is no public
-  // health-check/infra endpoint to exempt yet (YAGNI on an opt-out
-  // mechanism until one exists). CORS preflight (OPTIONS) requests never
-  // reach these hooks — @fastify/cors short-circuits them itself (m-03).
   // Declared as `undefined` at runtime — the `authenticate` hook below is
   // what actually assigns a real value on every request before any route
   // handler runs. Cast past Fastify's decorateRequest typing (which expects
   // a value already matching the declared, non-optional Account/
   // AuthenticatedPrincipal types from ./auth/types.ts) since the real
   // runtime guarantee comes from hook ordering, not from this line.
+  // Decorators are visible from every child scope registered below, so
+  // this stays root-level regardless of which scope actually assigns them.
   app.decorateRequest('account', undefined as never);
   app.decorateRequest('principal', undefined as never);
-  app.addHook('preHandler', createAuthenticateHook(deps));
-  app.addHook('preHandler', createRequireVerifiedEmailHook());
 
-  registerProjectsRoutes(app, deps);
-  registerAnalysesRoutes(app, deps);
-  registerAiExplanationRoutes(app, deps);
-
-  // Global Error Boundary (42_Sprint_5_Review.md M-01): every route above
+  // Global Error Boundary (42_Sprint_5_Review.md M-01): every route below
   // already converts its own known error cases via sendApiError(), but an
   // unhandled exception (a DB/Storage failure that reaches no catch block,
   // a bug) would otherwise fall through to Fastify's default error
   // response — breaking the unified `{ error: { code, message } }`
   // contract and potentially leaking an internal exception message to the
   // client. Logged server-side for observability; the client only ever
-  // sees a fixed, generic message.
+  // sees a fixed, generic message. Registered on the root BEFORE either
+  // child scope below — Fastify's error-handler encapsulation is resolved
+  // at each child's definition time, so setting this any later would leave
+  // routes already registered in a child using Fastify's own generic
+  // default handler instead of this one.
   app.setErrorHandler((error, _request, reply) => {
     console.error('Unhandled API error', error);
     return sendApiError(reply, 500, 'INTERNAL_ERROR', 'An internal error occurred');
+  });
+
+  // Public Scope (57_Development_Setup_and_Eighth_Sprint.md §21) — routes
+  // that must never go through Clerk Authentication (currently just the
+  // Stripe Webhook, added in a later step). Fastify Encapsulation means the
+  // Protected Scope's hooks below are structurally invisible here — never
+  // an `if (path === '/webhooks/stripe')` branch inside authenticate.ts.
+  await app.register(async (_publicScope) => {
+    // Routes registered here in a later step.
+  });
+
+  // Protected Scope — every existing Product Resource route registrar,
+  // plus the two global Auth hooks (50_Development_Setup_and_Seventh_Sprint.md
+  // decision 5) registered inside this child context rather than on the
+  // root `app`, so they never apply to the Public Scope above. CORS
+  // preflight (OPTIONS) requests never reach either scope's hooks —
+  // @fastify/cors (registered on the root app) short-circuits them itself
+  // (m-03) before Fastify ever routes into a child context.
+  await app.register(async (protectedScope) => {
+    protectedScope.addHook('preHandler', createAuthenticateHook(deps));
+    protectedScope.addHook('preHandler', createRequireVerifiedEmailHook());
+
+    registerProjectsRoutes(protectedScope, deps);
+    registerAnalysesRoutes(protectedScope, deps);
+    registerAiExplanationRoutes(protectedScope, deps);
   });
 
   return app;

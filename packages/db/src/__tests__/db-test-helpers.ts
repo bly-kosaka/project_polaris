@@ -12,6 +12,10 @@ import { PrismaProjectRepository } from '../project/prisma-project-repository.js
  */
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   await prisma.aIExplanationRecord.deleteMany();
+  await prisma.billingWebhookEvent.deleteMany();
+  await prisma.usageEvent.deleteMany();
+  await prisma.subscription.deleteMany();
+  await prisma.billingCustomer.deleteMany();
   await prisma.observationSetRecord.deleteMany();
   await prisma.analysisExecution.deleteMany();
   await prisma.uploadedAccessLog.deleteMany();
@@ -32,6 +36,48 @@ export async function createTestAccount(prisma: PrismaClient): Promise<{ id: str
     data: { authProvider: 'clerk', authSubject: `test-subject-${randomUUID()}`, emailVerified: true },
   });
   return { id: account.id };
+}
+
+/**
+ * The SOLE mechanism, anywhere in the test suite, for granting an Account
+ * Pro (`58_Sprint_8_Plan_Review.md` M-01) — writes the `Subscription` row
+ * directly via Prisma, the exact same table `resolveEntitlement()` reads in
+ * production. Never routed through `FakeBillingGateway` or any simulated
+ * webhook — that Gateway's own internal state has zero bearing on
+ * Entitlement by design (T-BILL-16/17).
+ */
+export async function createTestSubscription(
+  prisma: PrismaClient,
+  input: {
+    accountId: string;
+    status?: string;
+    providerSubscriptionId?: string;
+    cancelAtPeriodEnd?: boolean;
+    currentPeriodEnd?: Date;
+  },
+): Promise<{ id: string }> {
+  const subscription = await prisma.subscription.create({
+    data: {
+      accountId: input.accountId,
+      provider: 'stripe',
+      providerSubscriptionId: input.providerSubscriptionId ?? `test-sub-${randomUUID()}`,
+      status: input.status ?? 'active',
+      cancelAtPeriodEnd: input.cancelAtPeriodEnd ?? false,
+      currentPeriodEnd: input.currentPeriodEnd ?? null,
+    },
+  });
+  return { id: subscription.id };
+}
+
+export async function createTestBillingCustomer(
+  prisma: PrismaClient,
+  input: { accountId: string; stripeCustomerId?: string },
+): Promise<{ id: string; stripeCustomerId: string }> {
+  const stripeCustomerId = input.stripeCustomerId ?? `test-cus-${randomUUID()}`;
+  const customer = await prisma.billingCustomer.create({
+    data: { accountId: input.accountId, stripeCustomerId },
+  });
+  return { id: customer.id, stripeCustomerId: customer.stripeCustomerId };
 }
 
 async function* linesFrom(rawLines: string[]): AsyncGenerator<string> {

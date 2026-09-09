@@ -103,7 +103,10 @@ model Account {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  projects Project[]
+  projects        Project[]
+  billingCustomer BillingCustomer?
+  subscription    Subscription?
+  usageEvents     UsageEvent[]
 }
 
 model Project {
@@ -150,6 +153,7 @@ model Analysis {
   uploadedAccessLog  UploadedAccessLog?
   executions         AnalysisExecution[]
   aiExplanation      AIExplanationRecord?
+  usageEvent         UsageEvent?
 
   @@index([projectId])
 }
@@ -248,4 +252,68 @@ model AIExplanationRecord {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Account:BillingCustomer is 1:1 — accountId @unique enforces "at most one
+// Stripe Customer per Account" at the DB level, mirroring the existing
+// Project.ownerAccountId FK convention (onDelete: Restrict).
+model BillingCustomer {
+  id               String   @id @default(cuid())
+  accountId        String   @unique
+  account          Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  stripeCustomerId String   @unique
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// Account:Subscription is 1:0..1 — accountId @unique. `provider`/`status`
+// are deliberately plain Strings, not enums — mirrors Account.authProvider's
+// own precedent: an unrecognized future Stripe status must never fail to
+// write at webhook-ingest time, since Fail Closed ("unknown -> Free") is
+// enforced in the Resolver, not by rejecting the write
+// (50_Development_Setup_and_Seventh_Sprint.md m-04-style reasoning, applied
+// to Sprint 8 per 57_Development_Setup_and_Eighth_Sprint.md §11-12).
+model Subscription {
+  id                     String    @id @default(cuid())
+  accountId              String    @unique
+  account                Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  provider               String
+  providerSubscriptionId String    @unique
+  providerPriceId        String?
+  status                 String
+  cancelAtPeriodEnd      Boolean   @default(false)
+  currentPeriodEnd       DateTime?
+  providerUpdatedAt      DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+}
+
+// Webhook idempotency ledger (57_Development_Setup_and_Eighth_Sprint.md
+// §25) — providerEventId @unique is the sole enforcement; a duplicate
+// delivery's insert throws P2002 inside the same transaction as the
+// Subscription upsert, rolling back cleanly.
+model BillingWebhookEvent {
+  id              String   @id @default(cuid())
+  provider        String
+  providerEventId String   @unique
+  eventType       String
+  createdAt       DateTime @default(now())
+}
+
+// analysisId @unique is the DB-level enforcement of "1 Analysis = at most 1
+// UsageEvent" (§39) — same idempotency pattern as ObservationSetRecord/
+// AIExplanationRecord above. Recorded transactionally alongside
+// ObservationSet persist success only — never on upload, never on a Fatal
+// Analyzer result (persist-analyzer-result.ts's persistAnalyzerFailure
+// never touches this model at all).
+model UsageEvent {
+  id         String   @id @default(cuid())
+  accountId  String
+  account    Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  analysisId String   @unique
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  metric     String
+  occurredAt DateTime @default(now())
+
+  @@index([accountId, metric])
 }

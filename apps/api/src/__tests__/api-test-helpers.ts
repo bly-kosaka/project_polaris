@@ -16,6 +16,10 @@ export const BUCKET = 'polaris-api-tests';
 
 export async function resetDatabase(): Promise<void> {
   await prisma.aIExplanationRecord.deleteMany();
+  await prisma.billingWebhookEvent.deleteMany();
+  await prisma.usageEvent.deleteMany();
+  await prisma.subscription.deleteMany();
+  await prisma.billingCustomer.deleteMany();
   await prisma.observationSetRecord.deleteMany();
   await prisma.analysisExecution.deleteMany();
   await prisma.uploadedAccessLog.deleteMany();

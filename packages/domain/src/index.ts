@@ -4,3 +4,6 @@ export type { Project, ProjectStatus } from './project.js';
 export type { Analysis, AnalysisMetadata } from './analysis.js';
 export type { UploadedAccessLog, UploadedAccessLogStatus } from './uploaded-access-log.js';
 export type { AnalysisExecution, AnalysisExecutionType, AnalysisExecutionStatus } from './analysis-execution.js';
+export type { Plan, EffectiveEntitlement, SubscriptionSnapshot, BillingCustomer } from './billing.js';
+export { resolveEntitlement } from './entitlement.js';
+export type { UsageEvent } from './usage-event.js';

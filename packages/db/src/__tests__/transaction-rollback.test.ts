@@ -36,5 +36,13 @@ describe('persistAnalyzerSuccess transaction rollback (F-05)', () => {
 
     const reloaded = await new PrismaAnalysisRepository(prisma).findById(analysis.id);
     expect(reloaded?.status).toBe('created');
+
+    // T-USAGE-04: the UsageEvent write happens even later in the same
+    // transaction than the ObservationSetRecord insert above — if the whole
+    // transaction didn't roll back atomically, this is exactly where a
+    // stray UsageEvent could leak through despite the Analysis/
+    // ObservationSet writes failing.
+    const usageEvents = await prisma.usageEvent.findMany({ where: { analysisId: analysis.id } });
+    expect(usageEvents).toHaveLength(0);
   });
 });
