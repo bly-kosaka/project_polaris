@@ -248,4 +248,6 @@ polaris/
 
 最重要不変条件：Analyzerの出力はFree/Proで完全に同一（`packages/analyzer`は不可侵）。Ownership（404）は常にEntitlement（403）より先に判定する — 非所有Resourceへの403は存在の有無を漏らすため使わない。Checkoutの`success_url`到達だけではProを確定させない（Webhookが書き込んだ`Subscription` Snapshotのみが根拠）。Subscription StatusからPlanへのMappingはFail Closed（`active` / `trialing` / `past_due`のみPro、それ以外— 将来の未知のStatusも含む — はFree）。Webhookは順序非依存かつIdempotent（Payload自体を信用せずStripeへ正規再取得する）。テストでProを付与する手段は`Subscription` Tableへの直接書き込みのみ（`FakeBillingGateway`内部StateはEntitlement判定に一切関与しない）。CIは実Stripe呼び出しを一切行わない（`apps/api`の`index.ts`はCIのどのStepからも起動されないため`STRIPE_*`はCIで未設定のままでよい）。
 
-含まない（意図的にスコープ外）：Usage Quota強制（`UsageEvent`は記録のみ）、Free/Pro以外のPlan、AI Chat機能、複数Billing Provider対応、Production Deploy／実Stripe Test-Mode Smoke Test（Stripe Test-Mode Keyが必要なため手動実施 — 未実施）。
+含まない（意図的にスコープ外）：Usage Quota強制（`UsageEvent`は記録のみ）、Free/Pro以外のPlan、AI Chat機能、複数Billing Provider対応、Production Deploy。
+
+実Stripe Test-Mode Smoke Test（`md/62_Sprint_8_Manual_Stripe_Smoke_Test.md`）はPASS済み。Checkout → Webhook → Subscription同期 → Billing表示 → AI Retry許可 → Customer Portal解約 → Webhook再同期までEnd-to-Endで確認した。この過程で`StripeGateway.getSubscription()`の`cancelAtPeriodEnd`判定漏れ（一部のBilling Modeでは`cancel_at_period_end`ではなく`cancel_at`で解約予定が表現される）を発見・修正している（自動テストでは検出できなかった、実Stripe環境固有の不整合）。
