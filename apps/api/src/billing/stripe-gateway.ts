@@ -80,7 +80,15 @@ export class StripeGateway implements BillingGateway {
       stripeCustomerId,
       ...(item?.price.id !== undefined ? { providerPriceId: item.price.id } : {}),
       status: subscription.status,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      // Confirmed via a real Stripe Test Mode Customer Portal cancellation
+      // (md/61 §22 Manual Smoke Test): a Portal-initiated cancel does NOT
+      // always set `cancel_at_period_end: true` — this account's Billing
+      // Mode instead scheduled it via `cancel_at` (a specific future
+      // timestamp), leaving `cancel_at_period_end` at `false`. Both fields
+      // mean "this Subscription is scheduled to stop," so either one being
+      // set must resolve to `cancelAtPeriodEnd: true` — never assume only
+      // the boolean field is used.
+      cancelAtPeriodEnd: subscription.cancel_at_period_end || subscription.cancel_at !== null,
       ...(item !== undefined ? { currentPeriodEnd: new Date(item.current_period_end * 1000).toISOString() } : {}),
     };
   }
